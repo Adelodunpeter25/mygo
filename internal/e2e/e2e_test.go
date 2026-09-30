@@ -662,6 +662,50 @@ func TestResizeFixedWindow(t *testing.T) {
 	}
 }
 
+// A page whose Content Security Policy runs only its own scripts still
+// talks to Go: the bridge and the messages it receives are not the page's.
+func TestStrictCSP(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
+	w.LoadHTML(`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-e2e'">
+<script nonce="e2e">
+window.results = [];
+(async () => {
+  results.push(await mygo.call("Greeter.Greet", "csp"));
+  const values = [];
+  await mygo.call("Streams.Count", 3, mygo.channel((v) => values.push(v)));
+  results.push(values.join(","));
+})().catch((e) => results.push("error: " + e.message));
+</script>`, "")
+	waitFor(t, w, "window.results && results.length === 2")
+	got, err := mygo.EvalAs[[]string](w, "results")
+	if err != nil || fmt.Sprint(got) != "[Hello, csp! 0,1,2]" {
+		t.Errorf("results = %q, %v", got, err)
+	}
+}
+
+// A window with an empty menu of its own has no menu bar, where windows
+// get the application's (Linux, Windows).
+func TestEmptyWindowMenu(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
+	if _, supported := menuBarShown(w); !supported {
+		t.Skip("the menu bar belongs to the application")
+	}
+	prev := mygo.App.Menu()
+	defer mygo.App.SetMenu(prev)
+	mygo.App.SetMenu(mygo.NewMenu([]*mygo.MenuItem{{Label: "App", Submenu: []*mygo.MenuItem{{Label: "Item"}}}}))
+	if shown, _ := menuBarShown(w); !shown {
+		t.Fatal("the window has no menu bar of the application")
+	}
+	w.SetMenu(mygo.NewMenu(nil))
+	if shown, _ := menuBarShown(w); shown {
+		t.Error("an empty menu left the menu bar")
+	}
+	w.SetMenu(nil)
+	if shown, _ := menuBarShown(w); !shown {
+		t.Error("SetMenu(nil) did not bring back the menu bar of the application")
+	}
+}
+
 // Resizing a centered window keeps its position, also when it was
 // resized right before, which GTK has not confirmed yet.
 func TestCenterThenResize(t *testing.T) {

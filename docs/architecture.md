@@ -65,7 +65,7 @@ before changing anything under `internal/`.
 │                       per-platform binary packages
 ├── plugins/            official plugins, each a Go package and its npm
 │                       package (@mygo-plugins/<name>) side by side: fetch,
-│                       websocket
+│                       websocket; and updater, the update window, Go only
 ├── cmd/mygo/           the CLI: init, generate, dev, build, doctor
 ├── examples/           hello, todo, frameless, native, vibrancy
 └── docs/               the user guides, and this architecture guide
@@ -214,19 +214,19 @@ purego gives three primitives, used everywhere:
 - GTK geometry changes are asynchronous: `SetBounds` remembers the requested
   rectangle, within the sizes GTK gives the window (`constrain`), as does a
   window about to show, which X has where GTK created it, or where it was,
-  until the window manager places it. `Bounds` reports that rectangle until
-  a configure event reports its size and, on X11, its position, or the
-  window manager's own (synthetic) report of the size comes, or another
-  size, which the window manager or the user chose. A window being placed
-  waits for the window manager's report: a reparenting one first puts its
-  frame where it created it. A report of the previous size was sent before
-  the window manager took the request (openbox sends one when the size
-  hints change); GTK would ask for that size again from it, so the backend
-  asks for the new one again.
+  until the window manager places it; `Center` moves that rectangle along.
+  `Bounds` reports that rectangle until a configure event reports its size
+  and, on X11, its position, or the window manager's own (synthetic)
+  report of the size comes, or another size, which the window manager or
+  the user chose. A window being placed waits for the window manager's
+  report: a reparenting one first puts its frame where it created it. A
+  report of the previous size was sent before the window manager took the
+  request (openbox sends one when the size hints change); GTK would ask
+  for that size again from it, so the backend asks for the new one again.
 - A window the user cannot resize is never smaller than its default size,
-  which `SetBounds` sets too, or than its natural size, which GTK makes
-  200x200 when the window's child has none, as the web view: the box around
-  the web view asks for 1x1.
+  which `SetBounds` sets too, and `SetResizable(false)` to the size it has,
+  or than its natural size, which GTK makes 200x200 when the window's child
+  has none, as the web view: the box around the web view asks for 1x1.
 - GTK gives windows without decorations no resize borders, so the outer
   5 px of the page of a frameless window, or one with a hidden title bar,
   resize it (16 px along the edges from a corner resize the corner). The web view's `motion-notify-event` shows
@@ -559,6 +559,40 @@ build` like mygo-runtime and released with the same version.
   calls numbered in order, since calls run on goroutines of their own and
   would otherwise race, and Go writes them in that order. Connections are
   keyed by window and a random id the page chooses.
+- **updater** is the update window, in the manner of Sparkle, built on
+  `mygo.Updater` alone. A *session* is a check and what follows it (the
+  release notes, the download, the offer to relaunch): a goroutine that
+  sets the session's *view* (title, message, progress, rendered notes,
+  buttons) and waits for responses, whether or not the window shows, so
+  that a background check shows it only when it has something to offer and
+  a "Check for Updates…" during one just shows it. The window's page, one
+  embedded HTML file loaded with `LoadHTML` (an `about:blank` page, so
+  trusted), watches the views through a `Channel` (`Watch`) and answers
+  with `Respond`; each set of buttons has a prompt number and only the
+  first answer to the current prompt counts, so a double click cannot
+  answer the next view. The plugin's service rejects calls from other
+  windows. Release notes are Markdown rendered in Go (`markdown.go`), which
+  escapes all HTML and only links http(s) and mailto URLs, and a
+  Content Security Policy with a nonce runs only the page's own script:
+  the page may call Go, and the notes come from the unsigned manifest.
+  Links open in the browser (`OnWillNavigate`). Views with release notes
+  have a fixed size; status views ask for the height of their text
+  (`Fit`). The window gets an empty menu of its own, so it has no menu bar
+  on Linux and Windows. `updater.json` in `PathUserData` keeps the
+  preferences, the skipped version and the time of the last check; the
+  next check is due an interval after it, or an hour after a failure, and
+  is rescheduled on resume since timers stop while the computer sleeps. An
+  update installed while the app runs is remembered, so that checks offer
+  to relaunch instead of installing it again. The texts are `Strings` in
+  the language that best matches `Options.Language` or `App.Locale`
+  (`matchLanguage`: language, script, region; Chinese scripts inferred
+  from regions such as TW; another variant of the language before
+  English), among the plugin's translations (`translations.go`) and the
+  app's, whose empty fields fall back to the plugin's, then English. The
+  page gets `lang`, which picks CJK fonts, and `dir`; status texts use
+  `unicode-bidi: plaintext` and the notes `dir="auto"`, as either may be
+  in another language than the window. The page reports the width its
+  buttons need too, as translations can be long.
 
 ## Typed client generation (`internal/tsgen`)
 
@@ -855,10 +889,22 @@ makes Cmd+C/V/Q work; other platforms get none unless the app sets one.
   removed resources do not linger; development builds on Linux and Windows
   remove what the previous build placed and this one lacks.
 - Packages for the other platforms. Windows gets "<name> Setup
-  <version>.exe" when NSIS (`makensis`) is installed (`nsis.go`): a
-  per-user install in `%LOCALAPPDATA%\Programs\<name>`, where the updater
-  can write, a Start menu shortcut and an uninstaller registered under
-  `HKCU\…\Uninstall\<identifier>`; `/S /D=<dir>` installs silently. Linux
+  <version>.exe", made with NSIS (`nsis.go`): a per-user install in
+  `%LOCALAPPDATA%\Programs\<name>`, where the updater can write, a Start
+  menu shortcut and an uninstaller registered under
+  `HKCU\…\Uninstall\<identifier>`; `/S /D=<dir>` installs silently.
+  `makensis` comes from an installation of NSIS or, on Windows, where NSIS
+  is rarely installed, from the official zip of the release `nsisRelease`
+  pins, which the CLI downloads once, checks against its SHA-256 and
+  unpacks into `<user cache>/mygo`, as Tauri does. Other systems skip the
+  installer without NSIS: its zip holds Windows programs only. A signed
+  app gets a signed uninstaller too, as with Tauri: `!uninstfinalize`
+  (NSIS 3.08 and later) makes makensis run `mygo sign-uninstaller` on the
+  uninstaller it generates, before it puts it into the installer, and the
+  CLI signs it as it signs the app. The executable and the Windows
+  configuration reach it through the environment (`MYGO_SIGNER`,
+  `MYGO_SIGN_SETTINGS`), since NSIS reads `$` in the script as its own
+  syntax. Linux
   gets a Debian package written in pure Go (`deb.go`) when
   `linux.maintainer` is set: the app in `/opt/<name>`, a `/usr/bin` link,
   the desktop entry (categories, comment, URL schemes) and hicolor icons,

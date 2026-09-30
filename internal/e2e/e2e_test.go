@@ -644,6 +644,105 @@ func TestWindowGeometryAndState(t *testing.T) {
 	}
 }
 
+// A window the user cannot resize still takes the sizes the app gives it,
+// smaller ones too: GTK keeps such windows at least as large as their
+// default size.
+func TestResizeFixedWindow(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 500, Height: 400, UseContentSize: true, DisableResize: true})
+	w.LoadHTML("<p>fixed</p>", "")
+	for _, size := range [][2]int{{360, 240}, {540, 420}} {
+		w.SetContentSize(size[0], size[1])
+		eventually(t, fmt.Sprintf("a %dx%d page", size[0], size[1]), func() bool {
+			got, _ := mygo.EvalAs[[2]int](w, "[innerWidth, innerHeight]")
+			return got == size
+		})
+	}
+	if w.IsResizable() {
+		t.Error("the window became resizable")
+	}
+}
+
+// Resizing a centered window keeps its position, also when it was
+// resized right before, which GTK has not confirmed yet.
+func TestCenterThenResize(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300, X: 10, Y: 10})
+	w.SetSize(380, 280)
+	w.Center()
+	w.SetSize(360, 260)
+	eventually(t, "a centered window", func() bool {
+		b := w.Bounds()
+		return b.X > 60 && b.Y > 60 && b.Width == 360 && b.Height == 260
+	})
+}
+
+// New windows report the bounds they were given right away and while the
+// window manager places them, also when they show again: X11 has a window
+// where GTK created it until then, and a reparenting window manager its
+// frame where it created that.
+func TestNewWindowBounds(t *testing.T) {
+	steady := func(w *mygo.Window, what string, want mygo.Rectangle) {
+		t.Helper()
+		for end := time.Now().Add(200 * time.Millisecond); time.Now().Before(end); time.Sleep(5 * time.Millisecond) {
+			if b := w.Bounds(); b != want {
+				t.Fatalf("%s: bounds = %+v, want %+v", what, b, want)
+			}
+		}
+	}
+	for i := range 4 {
+		want := mygo.Rectangle{X: 100 + 20*i, Y: 120 + 10*i, Width: 400, Height: 300}
+		w := newWindow(t, mygo.WindowOptions{X: want.X, Y: want.Y, Width: want.Width, Height: want.Height})
+		steady(w, fmt.Sprintf("window %d", i), want)
+		w.Hide()
+		steady(w, fmt.Sprintf("hidden window %d", i), want)
+		w.Show()
+		steady(w, fmt.Sprintf("window %d shown again", i), want)
+	}
+	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
+	steady(w, "centered window", w.Bounds())
+}
+
+// Small windows the user cannot resize keep the sizes the app gives them:
+// GTK made them at least 200x200, their natural size with only a web view,
+// and asked for their previous size again from an early report of it.
+func TestSmallFixedWindow(t *testing.T) {
+	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300, UseContentSize: true, DisableResize: true})
+	w.LoadHTML("<p>small</p>", "")
+	for _, size := range [][2]int{{300, 150}, {300, 100}, {280, 80}} {
+		w.SetContentSize(size[0], size[1])
+		page := func() [2]int {
+			got, _ := mygo.EvalAs[[2]int](w, "[innerWidth, innerHeight]")
+			return got
+		}
+		eventually(t, fmt.Sprintf("a %dx%d page", size[0], size[1]), func() bool { return page() == size })
+		time.Sleep(300 * time.Millisecond) // and it stays so
+		width, height := w.ContentSize()
+		if got := page(); got != size || width != size[0] || height != size[1] {
+			t.Errorf("asked for %v: the page is %v, the content size %dx%d", size, got, width, height)
+		}
+	}
+}
+
+// Bounds reports the size GTK gives a window, not one it refused.
+func TestResizeBelowMinimum(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("GTK keeps windows within their minimum size")
+	}
+	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300, MinWidth: 320, MinHeight: 240, UseContentSize: true})
+	w.LoadHTML("<p>minimum</p>", "")
+	w.SetContentSize(200, 100)
+	if width, height := w.ContentSize(); width != 320 || height != 240 {
+		t.Errorf("content size = %dx%d, want the minimum", width, height)
+	}
+	eventually(t, "a 320x240 page", func() bool {
+		got, _ := mygo.EvalAs[[2]int](w, "[innerWidth, innerHeight]")
+		return got == [2]int{320, 240}
+	})
+	w.SetContentSize(320, 200) // the window already has the size GTK gives
+	if width, height := w.ContentSize(); width != 320 || height != 240 {
+		t.Errorf("content size = %dx%d, want the minimum", width, height)
+	}
+}
+
 // eventually waits for cond, which polls the window system.
 func eventually(t *testing.T, what string, cond func() bool) {
 	t.Helper()

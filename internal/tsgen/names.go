@@ -65,9 +65,9 @@ func propertyName(s string) string {
 	return quote(s)
 }
 
-// camel converts a Go identifier to lower camel case: "GetUserByID" becomes
+// Camel converts a Go identifier to lower camel case: "GetUserByID" becomes
 // "getUserByID", "URLFor" becomes "urlFor" and "ID" becomes "id".
-func camel(s string) string {
+func Camel(s string) string {
 	runes := []rune(s)
 	n := 0
 	for n < len(runes) && unicode.IsUpper(runes[n]) {
@@ -116,9 +116,9 @@ func eventKey(name string) string {
 	return key
 }
 
-// typeName turns a reflect type name, possibly with type arguments such as
+// TypeName turns a reflect type name, possibly with type arguments such as
 // "Page[github.com/x/app.User]", into a TypeScript identifier ("PageUser").
-func typeName(name string) string {
+func TypeName(name string) string {
 	var b strings.Builder
 	var part strings.Builder
 	flush := func() {

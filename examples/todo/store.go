@@ -78,12 +78,14 @@ func (t *Todos) List(filter Filter) []Todo {
 	defer t.mu.Unlock()
 	out := []Todo{}
 	for _, it := range slices.Backward(t.items) {
-		if filter == FilterAll || (filter == FilterDone) == it.Done {
+		if filter.matches(it) {
 			out = append(out, it)
 		}
 	}
 	return out
 }
+
+func (f Filter) matches(it Todo) bool { return f == FilterAll || (f == FilterDone) == it.Done }
 
 // Add creates a todo.
 func (t *Todos) Add(title string) (Todo, error) {
@@ -142,13 +144,13 @@ func (t *Todos) Stats() Stats {
 	return t.stats()
 }
 
-// Export asks where to save the list and writes it as JSON. It returns the
-// chosen path, or "" when the dialog was canceled.
-func (t *Todos) Export(ctx context.Context) (string, error) {
-	return t.export(mygo.CallerWindow(ctx))
+// Export asks where to save the todos matching filter and writes them as
+// JSON. It returns the chosen path, or "" when the dialog was canceled.
+func (t *Todos) Export(ctx context.Context, filter Filter) (string, error) {
+	return t.export(mygo.CallerWindow(ctx), filter)
 }
 
-func (t *Todos) export(parent *mygo.Window) (string, error) {
+func (t *Todos) export(parent *mygo.Window, filter Filter) (string, error) {
 	path, err := mygo.Dialog.Save(mygo.SaveDialogOptions{
 		Parent:      parent,
 		Title:       "Export Todos",
@@ -159,7 +161,8 @@ func (t *Todos) export(parent *mygo.Window) (string, error) {
 		return "", err
 	}
 	t.mu.Lock()
-	data, err := json.MarshalIndent(t.items, "", "  ")
+	items := slices.DeleteFunc(slices.Clone(t.items), func(it Todo) bool { return !filter.matches(it) })
+	data, err := json.MarshalIndent(items, "", "  ")
 	t.mu.Unlock()
 	if err != nil {
 		return "", err

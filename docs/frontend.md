@@ -123,6 +123,7 @@ await currentWindow.toggleMaximize();
 |---|---|
 | `call(method, ...args)`, `on(event, listener)`, `once(event, listener)`, `event<T>(name)` | untyped calls and events, see [bindings](bindings.md#without-the-generated-client) |
 | `Channel` | a stream of values from a Go method, see [channels](bindings.md#channels) |
+| `expose(name, functions)` | functions Go calls through a page API, see [calling the page from Go](bindings.md#calling-the-page-from-go) |
 | `isCallError(err)` | whether a rejection came from a Go error |
 | `isMyGo()` | whether the page runs in a MyGo window, not in a browser tab of the dev server |
 | `runtime()` | the runtime: `platform` (`"darwin"`, `"linux"` or `"win32"`), `windowId` (the Go window's `ID()`) and `version`; throws outside MyGo |

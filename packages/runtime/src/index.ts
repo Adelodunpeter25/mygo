@@ -84,6 +84,29 @@ export function once<T = unknown>(name: string, listener: (payload: T) => void):
   return runtime().once<T>(name, listener);
 }
 
+/**
+ * Exposes functions to Go, which calls them through a page API declared
+ * with `mygo.NewPageAPI`, under that API's name: the name of its Go type.
+ * The functions are named in lower camel case, as in the generated client,
+ * and may return a value or a promise. Prefer the typed function that
+ * `mygo generate` writes for each page API, such as `exposeEditor`:
+ *
+ * ```ts
+ * const withdraw = expose("Editor", {
+ *   text: () => textarea.value,
+ *   async open(name: string, text: string) {
+ *     textarea.value = text;
+ *   },
+ * });
+ * ```
+ *
+ * When functions of the same name are exposed several times, the latest
+ * answers. Returns a function that withdraws them.
+ */
+export function expose<T extends object>(name: string, functions: T): () => void {
+  return runtime().expose(name, functions);
+}
+
 /** A typed event sent by the Go side, declared with `mygo.NewEvent`. */
 export interface GoEvent<T> {
   readonly name: string;

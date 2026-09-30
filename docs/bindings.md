@@ -2,9 +2,10 @@
 
 The frontend calls Go through **bound services**: Go values whose exported
 methods pages can call, and which may stream values back through
-**channels**. Go reaches pages with **typed events**. `mygo generate` turns
-them into a TypeScript client, so calls, channels and events are checked by
-the compiler on both sides and documented in your editor.
+**channels**. Go reaches pages with **typed events**, and calls the
+functions they expose through **page APIs**. `mygo generate` turns them
+into a TypeScript client, so calls, channels, events and page functions are
+checked by the compiler on both sides and documented in your editor.
 
 ## Bind a service
 
@@ -317,16 +318,147 @@ methods that return one or take one inside another value.
 Events or channels? An event goes to every listener of a page, for as long
 as it lives; a channel carries the answer of one call and ends with it.
 
-## Without the generated client
+## Calling the page from Go
 
-`mygo-runtime` calls methods and subscribes to events by name, and pages
-without a build step reach the same functions on `window.mygo`:
+Events tell pages that something changed, and get no answer. When Go needs
+something from a page, such as the text being edited or whether it has
+unsaved changes, or wants it to do something and know when it is done, it
+calls functions that the page exposes, typed on both sides like bound
+methods. Declare them as the function fields of a struct, and the struct
+with `mygo.NewPageAPI` at package level, so that `mygo generate` finds it:
+
+```go
+// Editor is what the editor's page does for Go.
+type Editor struct {
+	// Text returns the text being edited.
+	Text func(ctx context.Context) (string, error)
+	// Dirty reports whether the text has unsaved changes.
+	Dirty func(ctx context.Context) (bool, error)
+	// Open shows a document.
+	Open func(ctx context.Context, name, text string) error
+}
+
+var editor = mygo.NewPageAPI[Editor]()
+```
+
+`editor.In(win)` returns an `*Editor` whose functions call the page of
+`win`, here the page that called a bound method:
+
+```go
+// Save writes the text of the calling page.
+func (d *Documents) Save(ctx context.Context) error {
+	text, err := editor.In(mygo.CallerWindow(ctx)).Text(ctx)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(d.path, []byte(text), 0o644)
+}
+```
+
+The client declares the page API as an interface, and a function that
+exposes an implementation of it, `exposeEditor`:
 
 ```ts
-import { call, on } from "mygo-runtime";
+import { exposeEditor } from "./mygo";
+
+exposeEditor({
+  text: () => textarea.value,
+  dirty: () => textarea.value !== saved,
+  async open(name, text) {
+    title.textContent = name;
+    textarea.value = saved = text;
+    await document.fonts.ready;
+  },
+});
+```
+
+The functions are named in lower camel case, like methods, and the page
+API after its Go type. They may return a value or a promise, which the call
+waits for, and the compiler checks their parameters and results. The page
+need not expose them all, and parts of it may expose different ones: when
+a function is exposed twice, the latest answers. `exposeEditor` returns a
+function that withdraws what it exposed, for components that come and go:
+
+```ts
+useEffect(() => exposeEditor({ text: () => textRef.current }), []);
+```
+
+A function of a page API may take a `context.Context` first, then any
+number of JSON-encodable arguments, including a variadic one, like a bound
+method, and returns an error, or a value and an error: a call can always
+fail. `NewPageAPI` panics on other fields and types, so mistakes show at
+startup.
+
+### When calls fail
+
+A call waits until the page's DOM is ready, like events, so calls made
+right after creating a window, or during a navigation, reach the next page.
+It fails:
+
+- with `mygo.ErrNotExposed` when the page does not expose the function, for
+  example because the window shows another page. Expose functions when the
+  page starts, as you subscribe to events, for calls made while it loads;
+- with a `*mygo.PageError` when the function throws or its promise rejects,
+  whose `Message` is what it threw;
+- when the page navigates away, or its window closes, before it answered;
+- when the page is not trusted: Go only calls the pages that may call Go
+  (see [who may call](#who-may-call));
+- when the context is done, which stops the wait but not the page's
+  function: a function that never answers keeps a call without a deadline
+  waiting until the page goes away.
+
+```go
+dirty, err := editor.In(win).Dirty(ctx)
+if errors.Is(err, mygo.ErrNotExposed) {
+	// The window shows another page.
+}
+```
+
+Calls are safe from any goroutine. On the main thread they keep processing
+the app's events while they wait, so event listeners can ask the page, such
+as whether a window may close:
+
+```go
+win.OnClose(func(e *mygo.CloseEvent) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if dirty, _ := editor.In(win).Dirty(ctx); dirty {
+		e.PreventDefault() // and let the user save first
+	}
+})
+```
+
+Events, channels or page APIs? An event tells every listener of a page and
+gets no answer; a channel streams Go's answer to a call of the page; a
+function of a page API is a call of Go that the page answers.
+
+### Running scripts
+
+To run arbitrary code in a page, typically to automate or test it, use
+`Window.Eval`, which returns the value of an expression, awaiting promises,
+decoded from JSON, or `mygo.EvalAs[T]` to decode it into a Go type:
+
+```go
+title, err := mygo.EvalAs[string](win, "document.title")
+count, err := mygo.EvalAs[int](win, "const items = document.querySelectorAll('li'); return items.length")
+```
+
+Statements run as the body of an async function, so `return` produces the
+value. A script that throws returns an `*mygo.EvalError`. Eval runs in any
+page, trusted or not, and is not subject to its Content Security Policy.
+
+## Without the generated client
+
+`mygo-runtime` calls methods, subscribes to events and exposes functions by
+name, and pages without a build step reach the same functions on
+`window.mygo`:
+
+```ts
+import { call, expose, on } from "mygo-runtime";
 
 const note = await call<Note>("Notes.Add", "Groceries");
 on<ExportProgress>("progress", (p) => console.log(p));
+expose("Editor", { text: () => textarea.value });
 ```
 
 ```html
@@ -335,6 +467,8 @@ on<ExportProgress>("progress", (p) => console.log(p));
   // mygo.channel() creates a channel.
   const lines = mygo.channel((line) => console.log(line));
   mygo.call("Shell.Tail", "ls", lines);
+  // The functions of a page API, named after its Go type.
+  mygo.expose("Editor", { text: () => document.querySelector("textarea").value });
 </script>
 ```
 
@@ -359,19 +493,6 @@ mygo.NewWindow(mygo.WindowOptions{
 `"*"` trusts every origin, including any site the page navigates to: avoid
 it in windows that show content you do not control. Frames embedded in a
 page never call Go, whatever their origin; only the top-level page of a
-window does.
-
-## From Go to the page
-
-Events are the way to tell pages about changes. To run code in a page,
-typically to automate or test it, use `Window.Eval`, which returns the
-value of an expression, awaiting promises, decoded from JSON, or
-`mygo.EvalAs[T]` to decode it into a Go type:
-
-```go
-title, err := mygo.EvalAs[string](win, "document.title")
-count, err := mygo.EvalAs[int](win, "const items = document.querySelectorAll('li'); return items.length")
-```
-
-Statements run as the body of an async function, so `return` produces the
-value. A script that throws returns an `*mygo.EvalError`.
+window does. The same pages are the only ones whose functions Go calls
+through [page APIs](#calling-the-page-from-go): a call to another page
+fails, so a site the window navigated to cannot answer in their place.

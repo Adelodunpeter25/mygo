@@ -48,6 +48,12 @@ export interface Runtime {
   on<T = unknown>(event: string, listener: (payload: T) => void): () => void;
   /** Like `on`, but unsubscribes after the first event. */
   once<T = unknown>(event: string, listener: (payload: T) => void): () => void;
+  /**
+   * Exposes functions to Go under the name of a page API, e.g.
+   * `expose("Editor", { text: () => editor.value })` for a Go
+   * `mygo.NewPageAPI[Editor]`. Returns a function that withdraws them.
+   */
+  expose<T extends object>(name: string, functions: T): () => void;
   /** The operating system. */
   readonly platform: Platform;
   /** Id of the Go `*mygo.Window` hosting this page. */

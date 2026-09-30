@@ -61,6 +61,7 @@ var ipc struct {
 	services []*service
 	methods  map[string]*method
 	events   []*eventInfo
+	pages    []*pageAPI
 }
 
 var (

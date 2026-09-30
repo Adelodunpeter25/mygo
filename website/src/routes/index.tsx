@@ -24,7 +24,7 @@ const features = [
   { title: "Pure Go, no cgo", text: "Build for every platform from any machine.", slug: "distribution" },
   {
     title: "Typed IPC",
-    text: "Bind Go services, stream values through channels and send typed events. The TypeScript client is generated from your Go code.",
+    text: "Bind Go services, stream values through channels, send typed events and call the page's functions. The TypeScript client is generated from your Go code.",
     slug: "bindings",
   },
   {

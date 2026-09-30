@@ -1,12 +1,13 @@
-// Todo is a small but complete MyGo app: typed services and events shared
-// with a TypeScript frontend, persistence, dialogs, menus and multiple
-// windows kept in sync. In examples/todo:
+// Todo is a small but complete MyGo app: typed services, events and page
+// functions shared with a TypeScript frontend, persistence, dialogs, menus
+// and multiple windows kept in sync. In examples/todo:
 //
 //	bun run dev    # live reload with the Vite dev server
 //	bun run build  # the app and a disk image in build/
 package main
 
 import (
+	"context"
 	"log"
 
 	"github.com/egoist/mygo"
@@ -28,8 +29,18 @@ func main() {
 			{Role: mygo.RoleAppMenu},
 			{Label: "File", Submenu: []*mygo.MenuItem{
 				{Label: "New Window", Accelerator: "CmdOrCtrl+N", Click: func(*mygo.MenuItem, *mygo.Window) { openWindow() }},
+				{Label: "New Todo", Accelerator: "CmdOrCtrl+T", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
+					go view.In(w).FocusNew(context.Background())
+				}},
 				{Label: "Export…", Accelerator: "CmdOrCtrl+E", Click: func(_ *mygo.MenuItem, w *mygo.Window) {
-					go store.export(w)
+					go func() {
+						// Export what the window shows: its page knows.
+						filter, err := view.In(w).Filter(context.Background())
+						if err != nil {
+							filter = FilterAll
+						}
+						store.export(w, filter)
+					}()
 				}},
 				mygo.Separator(),
 				{Role: mygo.RoleClose},

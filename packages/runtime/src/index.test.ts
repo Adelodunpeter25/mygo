@@ -4,6 +4,7 @@ import {
   call,
   currentWindow,
   event,
+  expose,
   isCallError,
   isMyGo,
   on,
@@ -15,6 +16,7 @@ import {
 
 const calls: [string, unknown[]][] = [];
 const listeners = new Map<string, (payload: unknown) => void>();
+const exposed = new Map<string, object>();
 
 const fake: Runtime = {
   call: async <T>(method: string, ...args: unknown[]) => {
@@ -37,6 +39,10 @@ const fake: Runtime = {
     listeners.set(name, listener as (payload: unknown) => void);
     return () => listeners.delete(name);
   },
+  expose: (name, functions) => {
+    exposed.set(name, functions);
+    return () => exposed.delete(name);
+  },
   platform: "darwin",
   windowId: 1,
   version: "0.1.0",
@@ -56,6 +62,7 @@ afterEach(() => {
   delete (globalThis as { mygo?: Runtime }).mygo;
   calls.length = 0;
   listeners.clear();
+  exposed.clear();
 });
 
 test("outside MyGo", async () => {
@@ -105,4 +112,14 @@ test("onFileDrop", () => {
   expect(got).toEqual([{ paths: ["/tmp/a.txt"], x: 10, y: 20 }]);
   off();
   expect(listeners.has("mygo:file-drop")).toBe(false);
+});
+
+test("expose", () => {
+  expect(() => expose("Editor", {})).toThrow("runtime not found");
+  (globalThis as { mygo?: Runtime }).mygo = fake;
+  const functions = { text: () => "hello" };
+  const withdraw = expose("Editor", functions);
+  expect(exposed.get("Editor")).toBe(functions);
+  withdraw();
+  expect(exposed.has("Editor")).toBe(false);
 });

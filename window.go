@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -211,10 +212,20 @@ type Window struct {
 	outMu    sync.Mutex
 	outbox   []message
 	flushing bool
-	// held keeps events until the page's DOM is ready, so events sent right
-	// after creating a window or during a navigation are not lost.
-	held     []message
+	// held keeps events and calls of page functions until the page's DOM
+	// is ready, so those sent right after creating a window or during a
+	// navigation are not lost.
+	held     []heldMessage
 	domReady bool
+	// pageToken is the token of the page whose DOM is ready, which the
+	// calls of page functions sent to it name, and pageTrusted whether
+	// it is trusted.
+	pageToken   string
+	pageTrusted bool
+	// invokes are the calls of page functions waiting for an answer, by
+	// id.
+	invokes   map[int64]*invocation
+	invokeSeq int64
 
 	onClose            listeners[func(*CloseEvent)]
 	onClosed           listeners[func()]
@@ -1085,7 +1096,9 @@ var errDestroyed = errors.New("mygo: window has been destroyed")
 //
 //	n, err := win.Eval("const items = document.querySelectorAll('li'); return items.length")
 //
-// Eval is not subject to the page's Content Security Policy.
+// Eval is not subject to the page's Content Security Policy. It suits
+// automation and tests; to call functions of the app's own pages, a
+// PageAPI is typed on both sides.
 func (w *Window) Eval(code string) (any, error) {
 	return w.EvalContext(context.Background(), code)
 }
@@ -1240,20 +1253,46 @@ const maxHeldEvents = 1024
 func (w *Window) enqueue(msg message, event bool) {
 	w.outMu.Lock()
 	if event && !w.domReady {
-		if len(w.held) == maxHeldEvents {
-			w.held = w.held[1:]
-		}
-		w.held = append(w.held, msg)
+		w.hold(heldMessage{msg: msg})
 		w.outMu.Unlock()
 		return
 	}
-	w.outbox = append(w.outbox, msg)
-	schedule := !w.flushing
-	w.flushing = true
+	schedule := w.queue(msg)
 	w.outMu.Unlock()
 	if schedule {
 		postMain(w.flush)
 	}
+}
+
+// queue adds msg to the outbox and reports whether a flush must be
+// scheduled. Guarded by outMu.
+func (w *Window) queue(msg message) bool {
+	w.outbox = append(w.outbox, msg)
+	schedule := !w.flushing
+	w.flushing = true
+	return schedule
+}
+
+// heldMessage is a message held until the page's DOM is ready: an event,
+// or the call of a page function inv, whose message names the page once
+// it is known.
+type heldMessage struct {
+	msg message
+	inv *invocation
+}
+
+// hold keeps m until the page's DOM is ready. Beyond maxHeldEvents, an
+// event drops the oldest one; calls of page functions are kept, since
+// their callers wait for them. Guarded by outMu.
+func (w *Window) hold(m heldMessage) {
+	if m.inv == nil && len(w.held) >= maxHeldEvents {
+		if w.held[0].inv == nil {
+			w.held = w.held[1:]
+		} else if i := slices.IndexFunc(w.held, func(h heldMessage) bool { return h.inv == nil }); i >= 0 {
+			w.held = slices.Delete(w.held, i, i+1)
+		}
+	}
+	w.held = append(w.held, m)
 }
 
 func (w *Window) flush() {
@@ -1414,6 +1453,12 @@ func (h *windowHandler) Closed() {
 	}
 	w.native = nil
 	w.destroyed.Store(true)
+	w.outMu.Lock()
+	calls := w.takeInvocations(false)
+	w.outMu.Unlock()
+	for _, inv := range calls {
+		inv.finish(invokeResult{err: errDestroyed})
+	}
 
 	windows.Lock()
 	for i, x := range windows.list {
@@ -1511,7 +1556,14 @@ func (h *windowHandler) NavigationCommitted(url string) {
 	h.w.trusted = h.w.isTrusted(url)
 	h.w.outMu.Lock()
 	h.w.domReady = false
+	h.w.pageToken, h.w.pageTrusted = "", false
+	// Calls sent to the previous page get no answer; those held wait for
+	// this one.
+	gone := h.w.takeInvocations(true)
 	h.w.outMu.Unlock()
+	for _, inv := range gone {
+		inv.finish(invokeResult{err: fmt.Errorf("mygo: %s: the page navigated away before it answered", inv.name)})
+	}
 	h.w.resetPage()
 	fire1(&h.w.onDidNavigate, url)
 }
@@ -1588,6 +1640,10 @@ func (w *Window) handleMessage(msg string) {
 		go handleCall(w, w.pageContext(), msg, w.trusted)
 		return
 	}
+	if strings.HasPrefix(msg, `{"t":"result",`) {
+		w.pageAnswered(msg)
+		return
+	}
 	var m struct {
 		T string  `json:"t"`
 		X float64 `json:"x"` // drop
@@ -1603,9 +1659,28 @@ func (w *Window) handleMessage(msg string) {
 	case "dom-ready":
 		w.outMu.Lock()
 		w.domReady = true
-		w.outbox = append(w.outbox, w.held...)
+		w.pageToken, w.pageTrusted = m.K, w.trusted
+		var untrusted []*invocation
+		for _, h := range w.held {
+			out := h.msg
+			if inv := h.inv; inv != nil {
+				if w.invokes[inv.id] != inv {
+					continue // canceled while it waited
+				}
+				if !w.pageTrusted {
+					delete(w.invokes, inv.id)
+					untrusted = append(untrusted, inv)
+					continue
+				}
+				out = inv.message(w.pageToken)
+			}
+			w.outbox = append(w.outbox, out)
+		}
 		w.held = nil
 		w.outMu.Unlock()
+		for _, inv := range untrusted {
+			inv.finish(invokeResult{err: untrustedPage(inv.name)})
+		}
 		// The script at document start may tell a later page the room of
 		// the controls before a change.
 		w.sendTitleBar()

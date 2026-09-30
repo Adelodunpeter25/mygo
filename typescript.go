@@ -6,12 +6,14 @@ import (
 	"path/filepath"
 	"reflect"
 	"slices"
+	"strings"
 
 	"github.com/egoist/mygo/internal/tsgen"
 )
 
 // GenerateTypeScript renders the typed TypeScript client for all services
-// bound with Bind and events declared with NewEvent.
+// bound with Bind, events declared with NewEvent and page APIs declared
+// with NewPageAPI.
 //
 // You rarely call this directly: `mygo generate` runs your app with the
 // MYGO_GENERATE environment variable set, which makes App.Run write the
@@ -48,6 +50,21 @@ func GenerateTypeScript() ([]byte, error) {
 	}
 	for _, e := range ipc.events {
 		model.Events = append(model.Events, tsgen.Event{Name: e.name, Type: e.typ, PC: e.pc, File: e.file, Line: e.line})
+	}
+	for _, p := range ipc.pages {
+		api := tsgen.PageAPI{Name: p.name, Type: p.typ, PC: p.pc}
+		for _, fn := range p.funcs {
+			api.Funcs = append(api.Funcs, tsgen.PageFunc{
+				Field:    fn.goName,
+				Name:     strings.TrimPrefix(fn.name, p.name+"."),
+				Type:     fn.typ,
+				Params:   fn.params,
+				Variadic: fn.variadic,
+				Result:   fn.result,
+				HasCtx:   fn.ctx,
+			})
+		}
+		model.PageAPIs = append(model.PageAPIs, api)
 	}
 	ipc.RUnlock()
 	return tsgen.Generate(model)

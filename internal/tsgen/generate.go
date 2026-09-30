@@ -18,6 +18,7 @@ import (
 type Model struct {
 	Services []Service
 	Events   []Event
+	PageAPIs []PageAPI
 }
 
 // Service is a bound Go value whose methods are callable from the page.
@@ -51,6 +52,32 @@ type Event struct {
 	PC   uintptr
 	File string
 	Line int
+}
+
+// PageAPI is a struct of functions that pages implement for Go, declared
+// with mygo.NewPageAPI.
+type PageAPI struct {
+	// Name is the name pages expose the functions under.
+	Name  string
+	Type  reflect.Type
+	Funcs []PageFunc
+	// PC is in the code that declared it, used to find its package.
+	PC uintptr
+}
+
+// PageFunc is a function of a page API. Params excludes an optional
+// leading context.Context (HasCtx); Result is nil for functions that only
+// return an error.
+type PageFunc struct {
+	// Field is the name of the struct field, Name the function's name in
+	// the page.
+	Field    string
+	Name     string
+	Type     reflect.Type
+	Params   []reflect.Type
+	Variadic bool
+	Result   reflect.Type
+	HasCtx   bool
 }
 
 type generator struct {
@@ -87,6 +114,9 @@ func Generate(m Model) ([]byte, error) {
 	for _, e := range m.Events {
 		g.src.learnPC(e.PC)
 	}
+	for _, p := range m.PageAPIs {
+		g.src.learnPC(p.PC)
+	}
 	g.src.resolvePackages(collectPackages(m))
 
 	var services bytes.Buffer
@@ -105,7 +135,7 @@ func Generate(m Model) ([]byte, error) {
 			var names []string
 			doc := ""
 			if fd != nil {
-				names = paramNames(fd)
+				names = paramNames(fd.Type)
 				if meth.HasCtx && len(names) > 0 {
 					names = names[1:]
 				}
@@ -113,30 +143,9 @@ func Generate(m Model) ([]byte, error) {
 					doc = fd.Doc.Text()
 				}
 			}
-			var params, args []string
-			used := map[string]bool{}
-			for pi, pt := range meth.Params {
-				name := ""
-				if pi < len(names) {
-					name = names[pi]
-				}
-				name = safeName(or(name, fmt.Sprintf("arg%d", pi)))
-				for used[name] {
-					name += "_"
-				}
-				used[name] = true
-				if meth.Variadic && pi == len(meth.Params)-1 {
-					params = append(params, "..."+name+": "+arrayOf(g.ts(pt.Elem())))
-					args = append(args, "..."+name)
-					continue
-				}
-				typ := g.ts(pt)
-				if pi < len(meth.Channels) && meth.Channels[pi] {
-					typ = "Channel<" + typ + ">"
-					channels = true
-				}
-				params = append(params, name+": "+typ)
-				args = append(args, name)
+			params, args := g.params(meth.Params, names, meth.Variadic, meth.Channels)
+			for pi := range meth.Params {
+				channels = channels || (pi < len(meth.Channels) && meth.Channels[pi])
 			}
 			result := "void"
 			if meth.Result != nil {
@@ -148,7 +157,7 @@ func Generate(m Model) ([]byte, error) {
 				call += ", " + strings.Join(args, ", ")
 			}
 			fmt.Fprintf(&services, "  %s(%s): Promise<%s> {\n    return call(%s);\n  },\n",
-				camel(meth.Name), strings.Join(params, ", "), result, call)
+				Camel(meth.Name), strings.Join(params, ", "), result, call)
 		}
 		services.WriteString("} as const;\n\n")
 	}
@@ -161,7 +170,33 @@ func Generate(m Model) ([]byte, error) {
 			writeDoc(&events, "  ", g.src.valueDoc(e.File, e.Line))
 			fmt.Fprintf(&events, "  %s: event<%s>(%s),\n", eventKey(e.Name), g.ts(e.Type), quote(e.Name))
 		}
-		events.WriteString("} as const;\n")
+		events.WriteString("} as const;\n\n")
+	}
+
+	// A page API is an interface for the page to implement, and a function
+	// that exposes an implementation.
+	var pages bytes.Buffer
+	for _, p := range m.PageAPIs {
+		iface := g.nameFor(p.Type)
+		writeDoc(&pages, "", g.src.typeDoc(p.Type))
+		fmt.Fprintf(&pages, "export interface %s {\n", iface)
+		for _, fn := range p.Funcs {
+			names := g.src.funcFieldParams(p.Type, fn.Field, fn.Type)
+			if fn.HasCtx && len(names) > 0 {
+				names = names[1:]
+			}
+			params, _ := g.params(fn.Params, names, fn.Variadic, nil)
+			result := "void"
+			if fn.Result != nil {
+				result = g.ts(fn.Result)
+			}
+			writeDoc(&pages, "  ", g.src.fieldDoc(p.Type, fn.Field))
+			fmt.Fprintf(&pages, "  %s(%s): %s | Promise<%s>;\n", propertyName(fn.Name), strings.Join(params, ", "), result, result)
+		}
+		pages.WriteString("}\n\n")
+		fmt.Fprintf(&pages, "/**\n * Exposes functions of {@link %s} to Go, which calls them in this page.\n * Returns a function that withdraws them.\n */\n", iface)
+		fmt.Fprintf(&pages, "export function expose%s(functions: Partial<%s>): () => void {\n  return expose(%s, functions);\n}\n\n",
+			p.Name, iface, quote(p.Name))
 	}
 
 	var out bytes.Buffer
@@ -173,6 +208,9 @@ func Generate(m Model) ([]byte, error) {
 	}
 	if events.Len() > 0 {
 		imports = append(imports, "event")
+	}
+	if pages.Len() > 0 {
+		imports = append(imports, "expose")
 	}
 	if channels {
 		imports = append(imports, "type Channel")
@@ -203,7 +241,41 @@ func Generate(m Model) ([]byte, error) {
 		out.WriteString("// ---- Events ----\n\n")
 		out.Write(events.Bytes())
 	}
+	if pages.Len() > 0 {
+		out.WriteString("// ---- Page APIs ----\n\n")
+		out.Write(pages.Bytes())
+	}
 	return bytes.TrimRight(out.Bytes(), "\n"), nil
+}
+
+// params renders parameters of the given types as TypeScript, named after
+// names where they have one, and the names to pass them on with.
+// channels marks those that are channels of their type.
+func (g *generator) params(types []reflect.Type, names []string, variadic bool, channels []bool) (params, args []string) {
+	used := map[string]bool{}
+	for i, t := range types {
+		name := ""
+		if i < len(names) {
+			name = names[i]
+		}
+		name = safeName(or(name, fmt.Sprintf("arg%d", i)))
+		for used[name] {
+			name += "_"
+		}
+		used[name] = true
+		if variadic && i == len(types)-1 {
+			params = append(params, "..."+name+": "+arrayOf(g.ts(t.Elem())))
+			args = append(args, "..."+name)
+			continue
+		}
+		typ := g.ts(t)
+		if i < len(channels) && channels[i] {
+			typ = "Channel<" + typ + ">"
+		}
+		params = append(params, name+": "+typ)
+		args = append(args, name)
+	}
+	return params, args
 }
 
 func or(s, fallback string) string {
@@ -253,6 +325,15 @@ func collectPackages(m Model) []string {
 	}
 	for _, e := range m.Events {
 		visit(e.Type)
+	}
+	for _, p := range m.PageAPIs {
+		visit(p.Type) // and the named types of its functions
+		for _, fn := range p.Funcs {
+			for _, t := range fn.Params {
+				visit(t)
+			}
+			visit(fn.Result)
+		}
 	}
 	out := make([]string, 0, len(pkgs))
 	for p := range pkgs {
@@ -355,13 +436,13 @@ func (g *generator) nameFor(t reflect.Type) string {
 	if name, ok := g.names[t]; ok {
 		return name
 	}
-	name := typeName(t.Name())
+	name := TypeName(t.Name())
 	if other, taken := g.taken[name]; taken && other != t {
 		pkg := t.PkgPath()
 		if i := strings.LastIndex(pkg, "/"); i >= 0 {
 			pkg = pkg[i+1:]
 		}
-		base := typeName(pkg) + name
+		base := TypeName(pkg) + name
 		name = base
 		for n := 2; ; n++ {
 			if _, taken := g.taken[name]; !taken {

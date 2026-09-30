@@ -1,6 +1,6 @@
 // Everything imported from ./mygo is generated from the Go code by
 // `mygo generate`: calls and payloads are fully typed.
-import { Todos, events, type Filter, type Todo } from "./mygo";
+import { Todos, events, exposeView, type Filter, type Todo } from "./mygo";
 
 const $ = <T extends HTMLElement = HTMLElement>(selector: string) => document.querySelector<T>(selector)!;
 
@@ -48,9 +48,15 @@ $("#filters").addEventListener("click", (e) => {
 });
 
 $("#clear").addEventListener("click", () => run(Todos.clearDone()));
-$("#export").addEventListener("click", () => run(Todos.export()));
+$("#export").addEventListener("click", () => run(Todos.export(filter)));
 
 // Changes made in any window (or from the menu) are broadcast by Go.
 events.todosChanged.on(() => render());
+
+// The menu calls these through Go's View (view.go).
+exposeView({
+  filter: () => filter,
+  focusNew: () => $("#title").focus(),
+});
 
 render();

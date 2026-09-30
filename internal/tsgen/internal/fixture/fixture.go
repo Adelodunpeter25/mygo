@@ -91,3 +91,19 @@ func (Tasks) Delete(int64) {}
 // Watch sends the tasks with the given status as they change. The test
 // declares updates a channel of tasks.
 func (Tasks) Watch(status Status, updates Task) {}
+
+// Editor is what the editor's page does for Go.
+type Editor struct {
+	// Text returns the text being edited.
+	Text func(ctx context.Context) (string, error)
+	// Open shows a task.
+	//
+	// It replaces the current one.
+	Open   func(ctx context.Context, name string, task Task) error
+	Select func(ids ...int64) (Page[Task], error) // Select selects tasks.
+	Find   Lookup
+	Blank  func(string, int) error
+}
+
+// Lookup finds a task.
+type Lookup func(ctx context.Context, id int64) (*Task, error)

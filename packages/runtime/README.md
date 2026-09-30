@@ -37,6 +37,16 @@ for await (const line of lines) console.log(line);
 await done;
 ```
 
+Go calls the functions a page exposes for a page API (`mygo.NewPageAPI`),
+which the generated client types, as `exposeEditor` for a Go `Editor`, or
+by name:
+
+```ts
+import { expose } from "mygo-runtime";
+
+const withdraw = expose("Editor", { text: () => textarea.value });
+```
+
 A Go method returning an error rejects with a `CallError` (see
 `isCallError`). Outside a MyGo window, e.g. when the dev server is opened in a
 browser, calls reject and `isMyGo()` is false.

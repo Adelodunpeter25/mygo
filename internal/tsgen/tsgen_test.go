@@ -41,6 +41,28 @@ func modelOf(name string, svc any) Service {
 	return s
 }
 
+// pageAPIOf describes the page API t as mygo.NewPageAPI does.
+func pageAPIOf(name string, t reflect.Type) PageAPI {
+	p := PageAPI{Name: name, Type: t}
+	for i := range t.NumField() {
+		f := t.Field(i)
+		ft := f.Type
+		fn := PageFunc{Field: f.Name, Name: Camel(f.Name), Type: ft, Variadic: ft.IsVariadic()}
+		start := 0
+		if ft.NumIn() > 0 && ft.In(0) == reflect.TypeFor[context.Context]() {
+			fn.HasCtx, start = true, 1
+		}
+		for j := start; j < ft.NumIn(); j++ {
+			fn.Params = append(fn.Params, ft.In(j))
+		}
+		if ft.NumOut() == 2 {
+			fn.Result = ft.Out(0)
+		}
+		p.Funcs = append(p.Funcs, fn)
+	}
+	return p
+}
+
 func generate(t *testing.T) string {
 	t.Helper()
 	tasks := modelOf("Tasks", &fixture.Tasks{})
@@ -52,6 +74,7 @@ func generate(t *testing.T) string {
 	out, err := Generate(Model{
 		Services: []Service{tasks},
 		Events:   []Event{{Name: "task-added", Type: reflect.TypeFor[fixture.Task]()}},
+		PageAPIs: []PageAPI{pageAPIOf("Editor", reflect.TypeFor[fixture.Editor]())},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -62,7 +85,7 @@ func generate(t *testing.T) string {
 func TestGenerate(t *testing.T) {
 	src := generate(t)
 	for _, want := range []string{
-		`import { call, event, type Channel } from "mygo-runtime";`,
+		`import { call, event, expose, type Channel } from "mygo-runtime";`,
 		`export type Status = "todo" | "done";`,
 		`export type Priority = 0 | 1 | 2;`,
 		"/** Task is a unit of work. */\nexport interface Task {",
@@ -92,6 +115,14 @@ func TestGenerate(t *testing.T) {
 		"  delete(arg0: number): Promise<void> {",
 		"  watch(status: Status, updates: Channel<Task>): Promise<void> {\n    return call(\"Tasks.Watch\", status, updates);\n  },",
 		`  taskAdded: event<Task>("task-added"),`,
+		"// ---- Page APIs ----\n\n/** Editor is what the editor's page does for Go. */\nexport interface Editor {\n",
+		"  /** Text returns the text being edited. */\n  text(): string | Promise<string>;\n",
+		"  /**\n   * Open shows a task.\n   *\n   * It replaces the current one.\n   */\n  open(name: string, task: Task): void | Promise<void>;\n",
+		"  /** Select selects tasks. */\n  select(...ids: number[]): PageTask | Promise<PageTask>;\n",
+		// A function type of its own gives its parameters' names.
+		"  find(id: number): Task | null | Promise<Task | null>;\n",
+		"  blank(arg0: string, arg1: number): void | Promise<void>;\n}\n",
+		"export function exposeEditor(functions: Partial<Editor>): () => void {\n  return expose(\"Editor\", functions);\n}",
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("generated code is missing:\n%s", want)
@@ -136,7 +167,7 @@ func TestGeneratedCodeTypeChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 	usage := `import { Channel, runtime } from "mygo-runtime";
-import { Tasks, events, type Task, type Status } from "./client";
+import { Tasks, events, exposeEditor, type Task, type Status } from "./client";
 const s: Status = "todo";
 const page = await Tasks.list(s, 10);
 const first: Task | undefined = page.items[0];
@@ -154,6 +185,20 @@ await watching;
 Tasks.watch("todo", new Channel<string>());
 // @ts-expect-error invalid enum value
 Tasks.list("nope", 1);
+const withdraw = exposeEditor({
+  text: () => "hello",
+  async open(name, task) {
+    name.toUpperCase();
+    task.title.toUpperCase();
+  },
+  select: (...ids) => ({ items: [], next: String(ids.length) }),
+  find: async (id) => (id > 0 ? null : null),
+});
+withdraw();
+// @ts-expect-error a result of another type
+exposeEditor({ text: () => 1 });
+// @ts-expect-error a function the page API does not have
+exposeEditor({ save: () => {} });
 `
 	if err := os.WriteFile(filepath.Join(dir, "usage.ts"), []byte(usage), 0o644); err != nil {
 		t.Fatal(err)
@@ -168,8 +213,8 @@ Tasks.list("nope", 1);
 
 func TestNames(t *testing.T) {
 	for in, want := range map[string]string{"Greet": "greet", "GetUserByID": "getUserByID", "URLFor": "urlFor", "ID": "id", "already": "already"} {
-		if got := camel(in); got != want {
-			t.Errorf("camel(%q) = %q, want %q", in, got, want)
+		if got := Camel(in); got != want {
+			t.Errorf("Camel(%q) = %q, want %q", in, got, want)
 		}
 	}
 	for in, want := range map[string]string{"progress": "progress", "file-changed": "fileChanged", "app:ready": "appReady", "a b": "aB", "123": `"123"`} {
@@ -178,8 +223,8 @@ func TestNames(t *testing.T) {
 		}
 	}
 	for in, want := range map[string]string{"User": "User", "Page[github.com/x/app.User]": "PageUser", "Pair[main.A,main.B]": "PairAB"} {
-		if got := typeName(in); got != want {
-			t.Errorf("typeName(%q) = %q, want %q", in, got, want)
+		if got := TypeName(in); got != want {
+			t.Errorf("TypeName(%q) = %q, want %q", in, got, want)
 		}
 	}
 	if safeName("new") != "new_" || safeName("x") != "x" {

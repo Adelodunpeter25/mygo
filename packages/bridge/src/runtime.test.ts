@@ -200,6 +200,161 @@ describe("channels", () => {
   });
 });
 
+describe("page functions", () => {
+  type ResultMsg = Extract<Outgoing, { t: "result" }>;
+
+  /** The page's token, from its dom-ready message. */
+  function ready(s: ReturnType<typeof setup>) {
+    s.ready();
+    const msg = s.sent.at(-1) as Extract<Outgoing, { t: "dom-ready" }>;
+    expect(msg.t).toBe("dom-ready");
+    expect(msg.k).toMatch(/^[0-9a-z]+$/); // Go reads it at the start of results
+    return msg.k;
+  }
+
+  /** The results posted so far, as they reach Go. */
+  const results = async (s: ReturnType<typeof setup>) => {
+    await new Promise((r) => setTimeout(r));
+    return s.sent.filter((m): m is ResultMsg => m.t === "result");
+  };
+
+  test("answer Go with values, promises and errors", async () => {
+    const s = setup();
+    const k = ready(s);
+    const editor = {
+      prefix: "> ",
+      text() {
+        return this.prefix + "hello";
+      },
+      open: async (name: string, text: string) => {
+        await Promise.resolve();
+        return name.length + text.length;
+      },
+      save: () => {},
+      fail() {
+        throw new Error("disk full");
+      },
+      reject: () => Promise.reject("nope"),
+    };
+    s.runtime.expose("Editor", editor);
+    s.internal.receive([
+      { t: "invoke", id: 1, k, m: "Editor.text", a: [] },
+      { t: "invoke", id: 2, k, m: "Editor.open", a: ["a.txt", "abc"] },
+      { t: "invoke", id: 3, k, m: "Editor.save" },
+      { t: "invoke", id: 4, k, m: "Editor.fail", a: [] },
+      { t: "invoke", id: 5, k, m: "Editor.reject", a: [] },
+    ]);
+    const got = await results(s);
+    expect(got.sort((a, b) => a.id - b.id)).toEqual([
+      { t: "result", id: 1, k, ok: true, v: "> hello" },
+      { t: "result", id: 2, k, ok: true, v: 8 },
+      { t: "result", id: 3, k, ok: true },
+      { t: "result", id: 4, k, ok: false, e: "disk full" },
+      { t: "result", id: 5, k, ok: false, e: "nope" },
+    ]);
+    // Go reads the id and the token first.
+    const raw: string[] = [];
+    const t = createRuntime({ platform: "linux", windowId: 1, version: "", secret: "" }, (m) => raw.push(m));
+    t.ready();
+    const token = (JSON.parse(raw[0]!) as { k: string }).k;
+    t.runtime.expose("Editor", editor);
+    t.internal.receive({ t: "invoke", id: 12, k: token, m: "Editor.text", a: [] });
+    await new Promise((r) => setTimeout(r));
+    expect(raw[1]).toStartWith(`{"t":"result","id":12,"k":"${token}",`);
+  });
+
+  test("functions the page does not expose", async () => {
+    const s = setup();
+    const k = ready(s);
+    s.runtime.expose("Editor", { text: () => "" });
+    s.internal.receive([
+      { t: "invoke", id: 1, k, m: "Editor.open", a: [] },
+      { t: "invoke", id: 2, k, m: "Other.text", a: [] },
+      // What every object inherits is not exposed.
+      { t: "invoke", id: 3, k, m: "Editor.toString", a: [] },
+      { t: "invoke", id: 4, k, m: "Editor.constructor", a: [] },
+      { t: "invoke", id: 5, k, m: "Editor", a: [] },
+    ]);
+    const got = await results(s);
+    expect(got.map((r) => [r.id, r.ok, r.missing])).toEqual([
+      [1, false, true],
+      [2, false, true],
+      [3, false, true],
+      [4, false, true],
+      [5, false, true],
+    ]);
+  });
+
+  test("invocations meant for another page are ignored", async () => {
+    const s = setup();
+    ready(s);
+    let calls = 0;
+    s.runtime.expose("Editor", { text: () => calls++ });
+    s.internal.receive({ t: "invoke", id: 1, k: "stale", m: "Editor.text", a: [] });
+    expect(calls).toBe(0);
+    expect(await results(s)).toEqual([]);
+  });
+
+  test("the latest exposure answers, until it is withdrawn", async () => {
+    const s = setup();
+    const k = ready(s);
+    const first = s.runtime.expose("Editor", { text: () => "first", open: () => "open" });
+    const second = s.runtime.expose("Editor", { text: () => "second" });
+    const text = async (id: number) => {
+      s.internal.receive({ t: "invoke", id, k, m: "Editor.text", a: [] });
+      return (await results(s)).find((r) => r.id === id);
+    };
+    expect((await text(1))?.v).toBe("second");
+    // Functions the latest does not have come from earlier ones.
+    s.internal.receive({ t: "invoke", id: 2, k, m: "Editor.open", a: [] });
+    expect((await results(s)).find((r) => r.id === 2)?.v).toBe("open");
+    second();
+    second(); // withdrawing twice is harmless
+    expect((await text(3))?.v).toBe("first");
+    first();
+    expect((await text(4))?.missing).toBe(true);
+    // The same object can be exposed twice and withdrawn once.
+    const fns = { text: () => "same" };
+    const a = s.runtime.expose("Editor", fns);
+    s.runtime.expose("Editor", fns);
+    a();
+    expect((await text(5))?.v).toBe("same");
+    expect(() => s.runtime.expose("Editor", null as unknown as object)).toThrow(TypeError);
+  });
+
+  test("values JSON cannot encode fail the call", async () => {
+    const s = setup();
+    const k = ready(s);
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    s.runtime.expose("Data", { big: () => 1n, cycle: () => cycle });
+    s.internal.receive([
+      { t: "invoke", id: 1, k, m: "Data.big", a: [] },
+      { t: "invoke", id: 2, k, m: "Data.cycle", a: [] },
+    ]);
+    const got = await results(s);
+    expect(got.map((r) => [r.id, r.ok])).toEqual([
+      [1, false],
+      [2, false],
+    ]);
+    expect(got[0]!.e).toStartWith("cannot encode the result:");
+  });
+
+  test("functions run in the order Go sent them, among events", () => {
+    const s = setup();
+    const k = ready(s);
+    const order: string[] = [];
+    s.runtime.on("changed", () => order.push("event"));
+    s.runtime.expose("Editor", { open: (name: string) => void order.push(name) });
+    s.internal.receive([
+      { t: "invoke", id: 1, k, m: "Editor.open", a: ["a"] },
+      { t: "event", n: "changed" },
+      { t: "invoke", id: 2, k, m: "Editor.open", a: ["b"] },
+    ]);
+    expect(order).toEqual(["a", "event", "b"]);
+  });
+});
+
 test("runtime object is frozen", () => {
   const { runtime } = setup();
   expect(runtime.platform).toBe("darwin");

@@ -39,6 +39,7 @@ before changing anything under `internal/`.
 ├── ipc.go              Bind/BindAs, method calls, Event[T], CallerWindow
 ├── plugin.go           Plugin and Use: services bound as "plugin:<name>"
 ├── channel.go          Channel[T]: values streamed to a call's page
+├── pageapi.go          PageAPI[T]: functions pages expose, which Go calls
 ├── typescript.go       GenerateTypeScript / WriteTypeScript (uses internal/tsgen)
 ├── protocol.go         custom schemes served by http.Handler, FileServer
 ├── frontend.go         the app's frontend: relative URLs, devUrl, mygo://localhost
@@ -349,9 +350,10 @@ purego gives three primitives, used everywhere:
 window's configuration (`bridge.Script`) and every backend injects it at
 document start into the main frame. It installs:
 
-- `window.mygo`: `call(method, ...args)`, `on(event, fn)`, `once`, the
-  `window` controls (`minimize`, `toggleMaximize`, `close`, …), `platform`,
-  `windowId`, `version`. Frozen, so pages cannot tamper with it.
+- `window.mygo`: `call(method, ...args)`, `on(event, fn)`, `once`,
+  `expose(name, functions)`, the `window` controls (`minimize`,
+  `toggleMaximize`, `close`, …), `platform`, `windowId`, `version`. Frozen,
+  so pages cannot tamper with it.
 - `window.__mygo.receive(messages)`, used by Go to deliver messages.
 - dom-ready notification and `--app-region: drag` handling for frameless
   windows (the mousedown is reported, the backend starts a native window drag
@@ -434,7 +436,10 @@ Trust):
 | `{"t":"call","id":N,"k":token,"m":"Service.Method","a":[...]}` | call a bound method |
 | `{"t":"chan-ack","c":N,"k":token,"n":S}` | the page took the values of channel N up to the S-th |
 | `{"t":"chan-close","c":N,"k":token}` | the page closed channel N |
-| `{"t":"dom-ready"}` | DOMContentLoaded fired |
+| `{"t":"result","id":N,"k":token,"ok":true,"v":value}` | the value of page function call N |
+| `{"t":"result","id":N,"k":token,"ok":false,"e":"message"}` | the page function threw or rejected |
+| `{"t":"result","id":N,"k":token,"ok":false,"missing":true}` | the page does not expose the function |
+| `{"t":"dom-ready","k":token}` | DOMContentLoaded fired in the page with that token |
 | `{"t":"drag"}` / `{"t":"dblclick"}` | mousedown / double click on a drag region |
 
 Go → page, batched into one `__mygo.receive([...])` evaluation per
@@ -449,9 +454,11 @@ faster, unless the inspector is enabled (development builds):
 | `{"t":"chan","c":N,"k":token,"p":value}` | a value of channel N; `"a":1` asks for an acknowledgment |
 | `{"t":"chan","c":N,"k":token,"end":true}` | Go closed channel N |
 | `{"t":"event","n":"name","p":payload}` | typed event |
+| `{"t":"invoke","id":N,"k":token,"m":"Editor.text","a":[...]}` | call N of a page function |
 
 `k` is a random per-page token: a reply meant for a page that has since
-navigated away can never resolve a promise of the new page.
+navigated away can never resolve a promise of the new page, and a call of
+a page function sent to a page never runs in the next one.
 
 ### Calls
 
@@ -509,6 +516,45 @@ messages: every half MiB of messages, a value asks for an acknowledgment,
 which the page sends once it took that value (handled it, or yielded it to
 an iterator), and `Send` waits while more than a MiB is unacknowledged. It
 never waits on the main thread, which receives the acknowledgments.
+
+### Page APIs
+
+A page API (`pageapi.go`) is the reverse of a bound service: a struct of
+function fields that `NewPageAPI[T]` validates like methods and registers
+(`ipc.pages`, for the generator), and whose `In(w)` fills a new `*T` with
+`reflect.MakeFunc` closures over `w`. A call encodes its arguments as a
+JSON array in the caller's goroutine and hands an `invocation` to the
+window, whose `invokes` map holds it by id until it is settled, once
+(`finish`, a compare-and-swap), by the page's answer, the caller's context,
+the page going away or the window closing. All of that is guarded by
+`outMu`, with the outbox, so a call needs no hop to the main thread:
+
+- **Addressing.** The dom-ready message carries the page's token, which
+  the window keeps with the page's trust decision (`pageToken`,
+  `pageTrusted`) until the next navigation commits. A call to a ready
+  page is sent at once, naming that token; the runtime ignores calls
+  naming another page, as it ignores replies.
+- **Holding.** A call made while the page is not ready waits in `held`,
+  in order with events, as a `heldMessage` whose message is written once
+  the next page reports dom-ready and its token is known; calls to an
+  untrusted page fail then, or at once when it is ready. The bound on held
+  messages drops events only, since the callers of held calls wait for
+  them, and calls canceled while held are dropped from `invokes` and
+  skipped.
+- **Answers.** `handleMessage` hands `{"t":"result",` messages to
+  `pageAnswered`, which reads the id and token the bridge writes first
+  (`resultHead`) without decoding the value, which can be large, settles
+  the call sent to that page with the whole message, and leaves decoding to
+  the caller's goroutine. A navigation commit fails the calls sent to the
+  previous page; `Closed` fails all of them.
+- **Waiting** uses `await`, so a call from the main thread pumps native
+  events until its answer arrives, like Eval.
+
+The page's runtime keeps the exposed objects per page API, latest last,
+and answers from the latest one with a function of that name that is not
+one every object inherits (`toString`). It runs the functions in the order
+of the batch, so they stay in order with events, and posts
+`{"t":"result",…}` with the value, what was thrown, or `"missing":true`.
 
 ### Eval
 
@@ -620,9 +666,11 @@ touching the GUI. The generator combines:
   located with `go list`. Without sources (e.g. `-trimpath` binaries) the
   client is still correct, just with `arg0` names and no docs.
 
-The output imports `call` and `event` from `mygo-runtime` and declares the
-interfaces, one object per service with camelCased methods, and an `events`
-object. `WriteTypeScript` only rewrites the file when its
+The output imports `call`, `event` and `expose` from `mygo-runtime` and
+declares the interfaces, one object per service with camelCased methods,
+an `events` object, and per page API an interface of its functions (each
+returning `T | Promise<T>`, their parameter names read from the field's
+function type, or from its named type) with an `expose<Name>` function. `WriteTypeScript` only rewrites the file when its
 content changes, so dev servers don't reload needlessly.
 
 ## Custom protocols
@@ -997,12 +1045,12 @@ profile).
 
 | suite | command | covers |
 |---|---|---|
-| core | `go test .` | lifecycle, quit, IPC, channels, events, Eval, protocol, frontend URLs and serving, menus, trust, single instance and its dev handover, dev ready signal (fake backend); `go test -run '^$' -bench .` measures the Go side of IPC and custom schemes |
+| core | `go test .` | lifecycle, quit, IPC, channels, events, page APIs, Eval, protocol, frontend URLs and serving, menus, trust, single instance and its dev handover, dev ready signal (fake backend); `go test -run '^$' -bench .` measures the Go side of IPC and custom schemes |
 | generator | `go test ./internal/tsgen` | TS output, json/v2 rules, source lookup; type-checks the output with `tsc` when `bun install` was run |
 | CLI | `go test ./cmd/mygo` | config, Info.plist, icons, universal binaries, template, dev launch/ready/stop (the test binary plays the app), watcher and `go list` inputs, resources (platform directories, universal pairs, staging, conflicts, dev placement; builds for every OS), frontend embedding (compiles an app with the overlay), `.DS_Store` against a dmgbuild golden file, a real DMG (`hdiutil`); builds and tools are skipped with `-short` |
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
 | plugins | `go test ./plugins/...` | the fetch plugin against `httptest` servers, the WebSocket client against a test server (ordering, fragments, pings, closing handshakes) |
-| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open; on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
+| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, page APIs, protocol, Eval, geometry, capture, menus, window.open; on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
 
 The XDG variables let the URL scheme test check that GLib opens the scheme
 with the handler it registered; without them it writes to temporary

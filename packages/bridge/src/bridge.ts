@@ -20,7 +20,7 @@ const INTERACTIVE =
   // iframes, whose messages Go must ignore.
   const post = (m: string) => raw.post(__MYGO_CONFIG__.secret + m);
 
-  const { runtime, internal } = createRuntime(__MYGO_CONFIG__, post);
+  const { runtime, internal, ready } = createRuntime(__MYGO_CONFIG__, post);
   Object.defineProperty(w, "mygo", { value: runtime, enumerable: true });
   Object.defineProperty(w, "__mygo", { value: Object.freeze({ ...internal, find, stopFind }) });
 
@@ -32,18 +32,18 @@ const INTERACTIVE =
     ),
   );
 
-  const notify = (t: "dom-ready" | "drag" | "dblclick") => {
+  const notify = (send: () => void) => {
     try {
-      post(JSON.stringify({ t }));
+      send();
     } catch {
       // The page is being torn down.
     }
   };
 
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => notify("dom-ready"), { once: true });
+    document.addEventListener("DOMContentLoaded", () => notify(ready), { once: true });
   } else {
-    notify("dom-ready");
+    notify(ready);
   }
 
   const nativeRegion = typeof CSS !== "undefined" && CSS.supports("-webkit-app-region", "drag");
@@ -102,7 +102,7 @@ const INTERACTIVE =
       if (e.button !== 0 || !(e.target instanceof Element)) return;
       if (appRegion(e.target) !== "drag" || e.target.closest(INTERACTIVE)) return;
       e.preventDefault();
-      notify(e.detail === 2 ? "dblclick" : "drag");
+      notify(() => post(JSON.stringify({ t: e.detail === 2 ? "dblclick" : "drag" })));
     },
     true,
   );

@@ -25,6 +25,11 @@ const report = (err: unknown) =>
     throw err;
   });
 
+/** The message of what page code threw, as Go gets it. */
+const message = (err: unknown) => String((err as Error | null | undefined)?.message || err);
+
+type Result = { ok: true; v?: unknown } | { ok: false; e?: string; missing?: true };
+
 /** Internal API called by the Go side through `window.__mygo`. */
 export interface Internal {
   /** Delivers one or more messages from Go. */
@@ -44,14 +49,17 @@ export class CallError extends Error {
 
 /**
  * Creates the renderer runtime. `post` delivers a serialized message to the
- * Go side. Kept free of DOM access so it can be unit tested.
+ * Go side; `ready` tells Go that the DOM is ready. Kept free of DOM access
+ * so it can be unit tested.
  */
 export function createRuntime(
   config: BridgeConfig,
   post: (message: string) => void,
-): { runtime: Runtime; internal: Internal } {
+): { runtime: Runtime; internal: Internal; ready: () => void } {
   // A per-page token keeps replies addressed to a previous page (before a
-  // navigation) from resolving promises of the current one.
+  // navigation) from resolving promises of the current one, and Go's
+  // invocations of page functions from running in another page. It is
+  // base 36, which Go reads at the start of results.
   const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
   const pending = new Map<number, Pending>();
   const listeners = new Map<string, Set<Listener>>();
@@ -60,6 +68,9 @@ export function createRuntime(
   const channels = new Map<number, ChannelState>();
   const states = new WeakMap<object, ChannelState>();
   let channelSeq = 0;
+  // The objects whose functions the page exposes to Go, by page API, in
+  // the order they were exposed.
+  const exposed = new Map<string, { functions: object }[]>();
 
   const send = (message: Outgoing) => post(JSON.stringify(message));
 
@@ -223,6 +234,62 @@ export function createRuntime(
     return off;
   };
 
+  const expose = (name: string, functions: object) => {
+    if (typeof functions !== "object" || functions === null) throw new TypeError("functions must be an object");
+    let list = exposed.get(name);
+    if (!list) exposed.set(name, (list = []));
+    // Wrapped, so the same object can be exposed twice and withdrawn once.
+    const entry = { functions };
+    list.push(entry);
+    return () => {
+      const i = list.indexOf(entry);
+      if (i < 0) return;
+      list.splice(i, 1);
+      if (list.length === 0 && exposed.get(name) === list) exposed.delete(name);
+    };
+  };
+
+  /** Finds the function fn of the page API api that was exposed last. */
+  const lookup = (api: string, fn: string) => {
+    const list = exposed.get(api) ?? [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const self = list[i]!.functions as Record<string, unknown>;
+      const f = self[fn];
+      // Not what every object inherits, such as toString.
+      if (typeof f === "function" && f !== (Object.prototype as Record<string, unknown>)[fn]) return { self, f };
+    }
+    return undefined;
+  };
+
+  /** Runs Go's invocation id of the page function name, and answers it. */
+  const invoke = (id: number, name: string, args: unknown[]) => {
+    const answer = (result: Result) => {
+      try {
+        send({ t: "result", id, k: token, ...result });
+      } catch (err) {
+        // A value JSON cannot encode, such as a BigInt or a cycle.
+        try {
+          send({ t: "result", id, k: token, ok: false, e: `cannot encode the result: ${message(err)}` });
+        } catch {
+          // The page is being torn down.
+        }
+      }
+    };
+    const dot = name.indexOf(".");
+    const target = dot > 0 ? lookup(name.slice(0, dot), name.slice(dot + 1)) : undefined;
+    if (!target) return answer({ ok: false, missing: true });
+    let value: unknown;
+    try {
+      value = target.f.apply(target.self, args);
+    } catch (err) {
+      return answer({ ok: false, e: message(err) });
+    }
+    Promise.resolve(value).then(
+      (v) => answer({ ok: true, v }),
+      (err) => answer({ ok: false, e: message(err) }),
+    );
+  };
+
   const internal: Internal = {
     receive(messages) {
       for (const msg of Array.isArray(messages) ? messages : [messages]) {
@@ -253,6 +320,9 @@ export function createRuntime(
           p.channels?.forEach((c) => c.end());
           if (msg.ok) p.resolve(msg.v);
           else p.reject(new CallError(p.method, msg.e ?? "unknown error"));
+        } else if (msg.t === "invoke") {
+          // In the order Go sent it, among the other messages.
+          if (msg.k === token) invoke(msg.id, msg.m, msg.a ?? []);
         }
       }
     },
@@ -264,6 +334,7 @@ export function createRuntime(
     channel,
     on,
     once,
+    expose,
     platform: config.platform,
     windowId: config.windowId,
     version: config.version,
@@ -279,5 +350,6 @@ export function createRuntime(
     }),
   });
 
-  return { runtime, internal };
+  const ready = () => send({ t: "dom-ready", k: token });
+  return { runtime, internal, ready };
 }

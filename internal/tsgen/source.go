@@ -142,11 +142,11 @@ func (s *sources) funcDecl(file string, line int, name string) *ast.FuncDecl {
 	return nil
 }
 
-// paramNames returns the names of all parameters of fd; unnamed parameters
-// yield "".
-func paramNames(fd *ast.FuncDecl) []string {
+// paramNames returns the names of all parameters of a function; unnamed
+// parameters yield "".
+func paramNames(ft *ast.FuncType) []string {
 	var names []string
-	for _, p := range fd.Type.Params.List {
+	for _, p := range ft.Params.List {
 		if len(p.Names) == 0 {
 			names = append(names, "")
 			continue
@@ -203,34 +203,59 @@ func (s *sources) typeDoc(t reflect.Type) string {
 	return ""
 }
 
-// fieldDoc returns the documentation of a struct field.
-func (s *sources) fieldDoc(owner reflect.Type, goName string) string {
+// field finds the declaration of a struct field.
+func (s *sources) field(owner reflect.Type, goName string) *ast.Field {
 	if owner.Name() == "" {
-		return ""
+		return nil
 	}
 	ts, _ := s.typeDecl(owner)
 	if ts == nil {
-		return ""
+		return nil
 	}
 	st, ok := ts.Type.(*ast.StructType)
 	if !ok {
-		return ""
+		return nil
 	}
 	for _, f := range st.Fields.List {
 		for _, n := range f.Names {
-			if n.Name != goName {
-				continue
+			if n.Name == goName {
+				return f
 			}
-			if f.Doc != nil {
-				return f.Doc.Text()
-			}
-			if f.Comment != nil {
-				return f.Comment.Text()
-			}
-			return ""
 		}
 	}
+	return nil
+}
+
+// fieldDoc returns the documentation of a struct field.
+func (s *sources) fieldDoc(owner reflect.Type, goName string) string {
+	f := s.field(owner, goName)
+	switch {
+	case f == nil:
+		return ""
+	case f.Doc != nil:
+		return f.Doc.Text()
+	case f.Comment != nil:
+		return f.Comment.Text()
+	}
 	return ""
+}
+
+// funcFieldParams returns the parameter names of a struct field of
+// function type typ, from the field's declaration or that of its named
+// type.
+func (s *sources) funcFieldParams(owner reflect.Type, goName string, typ reflect.Type) []string {
+	var ft *ast.FuncType
+	if typ.Name() != "" {
+		if ts, _ := s.typeDecl(typ); ts != nil {
+			ft, _ = ts.Type.(*ast.FuncType)
+		}
+	} else if f := s.field(owner, goName); f != nil {
+		ft, _ = f.Type.(*ast.FuncType)
+	}
+	if ft == nil {
+		return nil
+	}
+	return paramNames(ft)
 }
 
 // valueDoc returns the documentation of the variable declared at the

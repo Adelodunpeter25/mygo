@@ -29,6 +29,18 @@ func newEventForTest[T any](t testing.TB, name string) *Event[T] {
 	return e
 }
 
+// newPageAPIForTest is NewPageAPI for the duration of t.
+func newPageAPIForTest[T any](t testing.TB) *PageAPI[T] {
+	t.Helper()
+	p := NewPageAPI[T]()
+	t.Cleanup(func() {
+		ipc.Lock()
+		defer ipc.Unlock()
+		ipc.pages = slices.DeleteFunc(ipc.pages, func(a *pageAPI) bool { return a == p.api })
+	})
+	return p
+}
+
 // useForTest is Use for the duration of t. Plugins that fail are removed
 // too.
 func useForTest(t testing.TB, p Plugin) {

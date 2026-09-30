@@ -440,4 +440,15 @@ func TestPublishGitHub(t *testing.T) {
 	if !strings.HasSuffix(lines[3], "update-darwin-arm64.json") {
 		t.Errorf("the manifests must go last: %s", lines[3])
 	}
+
+	// Tagged releases leave the repository's latest release to the others.
+	os.Remove(calls)
+	c.Updates.TagPrefix = "desktop-v"
+	if err := publishGitHub(c, artifacts); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(calls)
+	if lines := strings.Split(strings.TrimSpace(string(b)), "\n"); len(lines) != 4 || !strings.HasPrefix(lines[1], "release create desktop-v1.2.0 --repo me/app --draft") || !strings.HasSuffix(lines[1], " --latest=false") {
+		t.Errorf("gh calls:\n%s", b)
+	}
 }

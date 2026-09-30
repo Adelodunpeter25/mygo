@@ -769,7 +769,9 @@ as in Tauri:
   of the newest published, non-prerelease release with that prefix, from
   the GitHub API's list of releases, newest first. `Updater.Check` and the
   delta step resolve it in Go, and `install.sh` in sh (`latest_tag`, which
-  reads the `tag_name`, `draft` and `prerelease` fields in order). With `updates.s3` it puts the
+  reads the `tag_name`, `draft` and `prerelease` fields in order). Such
+  drafts are made with `--latest=false`, and published the same way, so
+  the repository's latest release stays the others'. With `updates.s3` it puts the
   same files, manifests last, into a bucket of S3 or a compatible service
   (`cmd/mygo/s3.go`): one `PUT` per object, signed with AWS Signature
   Version 4 in pure Go (`crypto/hmac`), its SHA-256 payload hash checked

@@ -90,7 +90,11 @@ Publish the files where `updates` points to:
 - **GitHub**: `mygo build -upload` uploads them, with the installers, to a
   draft release of the version. Publishing the release makes it the latest,
   which apps check: they read the manifests from
-  `https://github.com/you/my-app/releases/latest/download/`.
+  `https://github.com/you/my-app/releases/latest/download/`. With a
+  `tagPrefix` of their own, the draft is not to become the latest, which
+  stays the other releases': publish it with
+  `gh release edit desktop-v1.2.0 --draft=false --latest=false`, or untick
+  "Set as the latest release", and apps find it by its tag.
 - **S3**: `mygo build -upload` uploads them, with the installers, to the
   bucket of `updates.s3`; see [below](#publishing-to-s3).
 - **Your server**: upload the archives, deltas and manifests to the `url`

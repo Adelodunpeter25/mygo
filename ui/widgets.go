@@ -132,6 +132,7 @@ func button(c *Context, label string, primary bool) *Element {
 func Link(c *Context, label, url string) *Element {
 	t := c.theme
 	e := Text(c, label).TextColor(t.Accent).Cursor(CursorPointer).Focusable()
+	e.widget = "Link"
 	if e.Clicked() && url != "" {
 		c.rt.host.openURL(url)
 	}
@@ -151,6 +152,7 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 	t := c.theme
 	row := Row(c).Gap(8).Focusable().Shrink(0)
 	row.flags |= flagClickable | flagHover | flagOwnRing
+	row.widget = "Checkbox"
 	if row.Clicked() {
 		*checked = !*checked
 		row.st.changed = true
@@ -189,6 +191,7 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 	t := c.theme
 	row := Row(c).Gap(8).Focusable().Shrink(0)
 	row.flags |= flagClickable | flagHover | flagOwnRing
+	row.widget = "Radio"
 	if row.Clicked() && *selected != value {
 		*selected = value
 		row.st.changed = true
@@ -226,6 +229,7 @@ func Switch(c *Context, on *bool) *Element {
 	t := c.theme
 	sw := Box(c).Size(36, 20).Radius(10).Focusable().Shrink(0)
 	sw.flags |= flagClickable | flagHover
+	sw.widget = "Switch"
 	if sw.Clicked() {
 		*on = !*on
 		sw.st.changed = true
@@ -247,6 +251,7 @@ func Slider(c *Context, value *float64, lo, hi float64) *Element {
 	t := c.theme
 	s := Box(c).Height(20).MinWidth(80).Focusable()
 	s.flags |= flagDraggable | flagHover | flagOwnRing
+	s.widget = "Slider"
 	st := s.st
 	set := func(v float64) {
 		v = math.Max(lo, math.Min(hi, v))
@@ -334,6 +339,7 @@ func ScrollHorizontal(c *Context) *Element {
 // that only builds the rows in view, with row(i).
 func List(c *Context, n int, rowHeight float32, row func(i int)) *Element {
 	e := Scroll(c)
+	e.widget = "List"
 	st := e.st
 	view := st.h
 	if view <= 0 {
@@ -487,6 +493,7 @@ func Popover(c *Context, anchor *Element, open *bool, fn func()) *Element {
 func Select(c *Context, selected *string, options []string) *Element {
 	t := c.theme
 	b := Button(c, "")
+	b.widget = "Select"
 	b.Justify(SpaceBetween).MinWidth(140)
 	open := Local(b, "open", func() bool { return false })
 	if b.Clicked() {

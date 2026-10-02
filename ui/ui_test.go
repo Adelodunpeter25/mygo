@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/internal/platform"
@@ -186,6 +187,23 @@ func TestTextInputFollowsTheFocusAtOnce(t *testing.T) {
 	if d.name != "Ada" {
 		t.Errorf("typed %q", d.name)
 	}
+}
+
+// TestKeyOnAWidget checks that keying a widget which used its state as it
+// was created panics rather than lose its input: the radio would never
+// see its clicks.
+func TestKeyOnAWidget(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "Key on a Radio") {
+			t.Errorf("Key on a Radio: recovered %v", r)
+		}
+	}()
+	choice := "a"
+	NewTester(func(c *Context) {
+		Row(c).Key("ok").Children(func() {
+			Radio(c, &choice, "b", "Beta").Key("b")
+		})
+	}, 200, 100)
 }
 
 func TestListScrollsAndSelects(t *testing.T) {

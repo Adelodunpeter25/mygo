@@ -170,6 +170,9 @@ type Element struct {
 	image    *Bitmap
 	fit      Fit
 	label    string
+	// widget names the widget that used the element's state as it created
+	// it, which Key would then lose.
+	widget string
 
 	// Layout results, in DIPs relative to the window.
 	x, y, w, h float32
@@ -217,8 +220,14 @@ func (e *Element) Children(fn func()) *Element {
 // Key identifies the element among its siblings by k instead of by its
 // position, so that its state (focus, scrolling, text being edited, …)
 // follows it when the siblings before it change. Call it right after
-// creating the element.
+// creating the element. Widgets that handle their input as they are
+// created (Checkbox, Radio, Switch, Slider, Select, Link, List, TextInput
+// and TextArea) cannot take a key, and Key panics: give it to an element
+// around them instead, as Row(c).Key(k).Children(...) does.
 func (e *Element) Key(k any) *Element {
+	if e.widget != "" {
+		panic("ui: Key on a " + e.widget + ", which handles its input as it is created: give the key to an element around it")
+	}
 	e.c.rekey(e, k)
 	return e
 }

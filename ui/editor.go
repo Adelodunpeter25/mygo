@@ -524,6 +524,10 @@ func textInput(c *Context, value *string, multiline bool) *Element {
 	t := c.theme
 	e := c.newElement(kindInput)
 	e.flags |= flagEditable | flagFocusable | flagHover
+	e.widget = "TextInput"
+	if multiline {
+		e.widget = "TextArea"
+	}
 	st := e.st
 	if st.editor == nil {
 		st.editor = newEditor()

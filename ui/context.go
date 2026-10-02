@@ -13,15 +13,16 @@ import (
 // view function receives it on the main thread; it is only valid during
 // that call.
 type Context struct {
-	rt      *engine
-	parent  *Element
-	root    *Element
-	chunks  [][]Element
-	used    int
-	theme   *Theme
-	now     time.Time
-	w, h    float32
-	overlay *Element
+	rt       *engine
+	parent   *Element
+	root     *Element
+	chunks   [][]Element
+	used     int
+	theme    *Theme
+	now      time.Time
+	w, h     float32
+	titleBar TitleBar
+	overlay  *Element
 }
 
 const chunkSize = 256
@@ -146,6 +147,22 @@ func (c *Context) SetTheme(t *Theme) {
 
 // Size returns the size of the window's content in DIPs.
 func (c *Context) Size() (width, height float32) { return c.w, c.h }
+
+// TitleBar is the room the window controls take at the top of a window
+// with a hidden title bar, in DIPs: they sit in a band of Height along the
+// top edge, Left wide from the left edge and Right wide from the right.
+type TitleBar struct{ Height, Left, Right float32 }
+
+// TitleBar returns the room the window controls take in a window with a
+// hidden title bar (mygo.WindowOptions.TitleBarStyle), whose view draws
+// the title bar under them: the traffic lights on macOS, the window
+// buttons on Linux and Windows. It is zero in other windows and in full
+// screen, where the controls hide. Keep clear of the controls, and let the
+// title bar drag the window:
+//
+//	bar := c.TitleBar()
+//	ui.Row(c).Height(max(bar.Height, 32)).Padding(0, bar.Right, 0, bar.Left).DragWindow()
+func (c *Context) TitleBar() TitleBar { return c.titleBar }
 
 // Now returns the time the frame started, for animations.
 func (c *Context) Now() time.Time { return c.now }

@@ -21,6 +21,7 @@ type host interface {
 	startDrag()
 	titleBarDoubleClicked()
 	isDark() bool
+	titleBar() TitleBar
 	// invalidate asks for a frame from any goroutine.
 	invalidate()
 	openURL(string)
@@ -145,6 +146,7 @@ func (rt *engine) runFrame() {
 	rt.frame++
 	now := time.Now()
 	w, h, scale := rt.host.size()
+	rt.c.titleBar = rt.host.titleBar()
 	rt.text.BeginFrame()
 	rt.animating = false
 	rt.routeKeys()

@@ -41,7 +41,13 @@ func (w *Window) attachContent() {
 				w.native.TitleBarDoubleClicked()
 			}
 		},
-		IsDark:     func() bool { return backend().Theme().IsDark() },
+		IsDark: func() bool { return backend().Theme().IsDark() },
+		TitleBar: func() platform.TitleBar {
+			if !w.hiddenTitleBar || w.native == nil {
+				return platform.TitleBar{}
+			}
+			return w.native.TitleBar()
+		},
 		OpenURL:    func(url string) { go Shell.OpenExternal(url) },
 		Invalidate: w.Invalidate,
 	}

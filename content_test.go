@@ -105,6 +105,37 @@ func TestContentInvalidateAndUpdate(t *testing.T) {
 	}
 }
 
+// TestContentTitleBar checks that native UI gets the room the window
+// controls of a hidden title bar take, and a frame when it changes.
+func TestContentTitleBar(t *testing.T) {
+	var bar ui.TitleBar
+	view := func(c *ui.Context) { bar = c.TitleBar() }
+	w := NewWindow(WindowOptions{Width: 300, Height: 200, TitleBarStyle: TitleBarHidden, TitleBarHeight: 52, Content: ui.View(view)})
+	t.Cleanup(w.Destroy)
+	wins := fb.Windows()
+	fw := wins[len(wins)-1]
+	s := fw.FakeSurface()
+	onMain(func() { s.Frame() })
+	if bar != (ui.TitleBar{Height: 52, Right: 138}) {
+		t.Errorf("TitleBar = %+v", bar)
+	}
+	var framed bool
+	onMain(func() {
+		fw.TitleBarRoom = platform.TitleBar{Height: 46, Left: 80}
+		fw.H.TitleBarChanged()
+		framed = s.Frame()
+	})
+	if !framed || bar != (ui.TitleBar{Height: 46, Left: 80}) {
+		t.Errorf("after a change: frame %v, TitleBar = %+v", framed, bar)
+	}
+
+	// A window with its title bar has no room to keep clear of.
+	contentWindow(t, view)
+	if bar != (ui.TitleBar{}) {
+		t.Errorf("TitleBar of a window with a title bar = %+v", bar)
+	}
+}
+
 func TestContentTextInputTurnsOnIME(t *testing.T) {
 	name := ""
 	view := func(c *ui.Context) {

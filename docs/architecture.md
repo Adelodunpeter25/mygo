@@ -880,7 +880,8 @@ either.
 - **The connection.** `content.go` attaches the content to its window
   through `internal/surface.Conn`, which carries the surface and, as
   functions, what the content needs of the app (the clipboard, dragging
-  the window, the appearance, opening URLs), so `ui` imports neither
+  the window, the appearance, the room of a hidden title bar's controls,
+  opening URLs), so `ui` imports neither
   `mygo` nor a backend, and an app without native UI links none of it.
   `Window.Update` and `Invalidate` coalesce redraws asked from any goroutine
   into one frame on the main thread. Page methods return `errNoPage` or do

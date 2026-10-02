@@ -360,6 +360,19 @@ as menus, dialogs and the other native APIs. It has no page: it ignores
 (`Eval` returns an error). Its Go code needs no bindings: the view calls it
 directly. `CapturePage` returns a PNG of what it shows.
 
+With `TitleBarStyle: mygo.TitleBarHidden`, the view draws the title bar
+under the window controls, as a page does with the `--mygo-titlebar-*` CSS
+variables: `c.TitleBar()` returns the room the controls take, zero in full
+screen, and `DragWindow` makes elements drag the window, which
+double-clicking them zooms or minimizes as a title bar would:
+
+```go
+bar := c.TitleBar()
+ui.Row(c).Height(max(bar.Height, 32)).Padding(0, bar.Right+12, 0, bar.Left+12).DragWindow().Children(func() {
+	ui.Text(c, "Inbox").Bold()
+})
+```
+
 On Linux, an app whose windows all show native UI needs GTK 3 alone, not
 WebKitGTK.
 

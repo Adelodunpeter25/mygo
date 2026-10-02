@@ -199,7 +199,7 @@ func (g *gallery) text(c *ui.Context) {
 	})
 	card(c, "Typography", func() {
 		ui.Text(c, "Display 28").FontSize(28).Bold()
-		ui.Text(c, "Italic, underlined and struck through").Italic().Underline()
+		ui.Text(c, "Italic, underlined and struck through").Italic().Underline().Strikethrough()
 		ui.Text(c, "Monospace: func main() {}").Font("monospace")
 		ui.Text(c, "Mixed scripts: English, Ελληνικά, Русский, 日本語, 한국어, العربية, עברית, हिन्दी 🎉")
 		ui.Text(c, strings.Repeat("Long text wraps to the width it gets. ", 6)).TextColor(t.TextMuted)

@@ -73,8 +73,8 @@ type engine struct {
 	}
 	// dropOver is the element files are dragged over; access is true once
 	// assistive technology asked for the content.
-	dropOver uint64
-	access   bool
+	dropOver     uint64
+	access       bool
 	blinkStart   time.Time
 	inFrame      bool
 	dark         bool

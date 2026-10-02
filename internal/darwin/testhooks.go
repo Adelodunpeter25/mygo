@@ -469,4 +469,3 @@ func TestAccessibilityPerform(handle uintptr, label, action, value string) bool 
 	}
 	return false
 }
-

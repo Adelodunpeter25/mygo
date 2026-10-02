@@ -60,6 +60,10 @@ var xl struct {
 	mapWindow        func(dpy ptr, window uint64) int32
 	unmapWindow      func(dpy ptr, window uint64) int32
 	reparentWindow   func(dpy ptr, window, parent uint64, x, y int32) int32
+	getInputFocus    func(dpy ptr, focus *uint64, revert *int32) int32
+	setInputFocus    func(dpy ptr, focus uint64, revert int32, time uint64) int32
+	queryTree        func(dpy ptr, window uint64, root, parent *uint64, children *ptr, n *uint32) int32
+	free             func(data ptr) int32
 	moveResizeWindow func(dpy ptr, window uint64, x, y int32, width, height uint32) int32
 	setBackground    func(dpy ptr, window uint64, pixel uint64) int32
 	defaultScreen    func(dpy ptr) int32
@@ -171,6 +175,10 @@ func (b *Backend) loadCEF(dir string) error {
 	mustBind(x, &xl.mapWindow, "XMapWindow")
 	mustBind(x, &xl.unmapWindow, "XUnmapWindow")
 	mustBind(x, &xl.reparentWindow, "XReparentWindow")
+	mustBind(x, &xl.getInputFocus, "XGetInputFocus")
+	mustBind(x, &xl.setInputFocus, "XSetInputFocus")
+	mustBind(x, &xl.queryTree, "XQueryTree")
+	mustBind(x, &xl.free, "XFree")
 	mustBind(x, &xl.moveResizeWindow, "XMoveResizeWindow")
 	mustBind(x, &xl.setBackground, "XSetWindowBackground")
 	mustBind(x, &xl.defaultScreen, "XDefaultScreen")
@@ -511,12 +519,44 @@ func (w *window) detachPage() {
 		display := gdkDisplayGetDefault()
 		dpy := x11.xdisplay(display)
 		x11.errorTrapPush(display)
+		if focusIn(dpy, xid) {
+			// Hidden, the browser's window would pass the keyboard to its
+			// parent and, once that is destroyed, to no window, which
+			// stays so without a window manager. This window takes it, and
+			// X gives it to the root window when this one is destroyed.
+			const revertToParent = 2
+			xl.setInputFocus(dpy, uint64(xl.windowXID(gtkWidgetGetWindow(w.win))), revertToParent, 0)
+		}
 		xl.unmapWindow(dpy, xid)
 		xl.reparentWindow(dpy, xid, xl.rootWindow(dpy, xl.defaultScreen(dpy)), 0, 0)
 		xl.flush(dpy)
 		x11.errorTrapPop(display)
 	}
 	w.page.Close()
+}
+
+// focusIn reports whether the X11 window w or one of its descendants has
+// the keyboard.
+func focusIn(dpy ptr, w uint64) bool {
+	var focus uint64
+	var revert int32
+	xl.getInputFocus(dpy, &focus, &revert)
+	for focus > 1 { // None and PointerRoot are no windows
+		if focus == w {
+			return true
+		}
+		var root, parent uint64
+		var children ptr
+		var n uint32
+		if xl.queryTree(dpy, focus, &root, &parent, &children, &n) == 0 {
+			return false
+		}
+		if children != 0 {
+			xl.free(children)
+		}
+		focus = parent
+	}
+	return false
 }
 
 func (w *window) closePage() {

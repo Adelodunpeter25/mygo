@@ -333,7 +333,11 @@ purego gives three primitives, used everywhere:
 - **ABI.** On x64, structs over 8 bytes are passed by reference and Go
   mirrors the first integer arguments into the XMM registers, so doubles can
   be passed as bits. On ARM64, 16-byte structs travel in two registers and
-  floats cannot be passed, so zoom falls back to CSS (`abi_*.go`).
+  floats cannot be passed, so zoom falls back to CSS (`abi_*.go`). Go
+  callbacks read only integer registers: the two methods of UI Automation
+  that take doubles enter through thunks in assembly (`uia_*.s`), which
+  move the doubles' bits to the integer registers of their positions,
+  touching only registers a call may change, and jump to the callbacks.
 - DPI: the process is per-monitor aware (v2); the backend converts between
   pixels and DIPs with the window's or monitor's DPI. Frameless windows, and
   those with a hidden title bar, drop the caption in `WM_NCCALCSIZE` but
@@ -878,10 +882,32 @@ either.
   pixels drawn on the CPU (`PresentPixels`: a CGImage as the layer's
   contents, cairo in the `draw` signal, `SetDIBitsToDevice` in `WM_PAINT`);
   sets the cursor; and turns the input method on and off at the caret
-  (NSTextInputClient, GtkIMContext, IMM32). Everything else comes through
+  (NSTextInputClient, GtkIMContext, IMM32), with the text around it, up to
+  512 runes on each side (`SetTextInput`). Everything else comes through
   `WindowHandler.SurfaceEvent`, in DIPs: frames, resizes, the pointer, the
-  wheel, keys, text, compositions, focus, and the edit roles of menus
-  (`SurfaceCommand`).
+  wheel, keys, text, compositions, focus, the edit roles of menus
+  (`SurfaceCommand`), files dragged and dropped, and assistive technology.
+  Input methods name what text and compositions replace in the text
+  around the caret (`Replace`, `From`, `To`): NSTextInputClient's
+  replacement ranges, GtkIMContext's `delete-surrounding`, IMM32's
+  reconversion (`IMR_CONFIRMRECONVERTSTRING`). Files dragged over the
+  surface (NSDraggingDestination, a GTK drag destination, an OLE
+  `IDropTarget`) are `FileDragOver` events, whose answer the drag source
+  shows, and a drop a `FileDrop`; files the content does not take go to
+  `OnFileDrop`.
+- **Assistive technology.** Once it asks for a surface's content, the
+  backend sends `AccessibilityOn`, and the engine describes every frame
+  (`ui/access.go`) as a `platform.AccessTree`: nodes in pre-order with
+  roles, names, values, ranges, states, bounds and actions, under
+  `UpdateAccessibility`. Backends keep a native object per node ID and
+  tell the system what changed between trees: subclasses of
+  `NSAccessibilityElement` and AppKit's notifications on macOS; on Linux,
+  ATK objects of GObject types registered through purego below the
+  accessible of a `GtkDrawingArea` subclass, with ATK's signals, which GTK
+  bridges to AT-SPI; on Windows, UI Automation fragments, COM objects with
+  control patterns, answering `WM_GETOBJECT`, with UI Automation's events.
+  What assistive technology does comes back as `AccessAction` events,
+  which the engine performs as the pointer or the keyboard would.
 - **The connection.** `content.go` attaches the content to its window
   through `internal/surface.Conn`, which carries the surface and, as
   functions, what the content needs of the app (the clipboard, dragging
@@ -1161,7 +1187,7 @@ profile).
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
 | plugins | `go test ./plugins/...` | the fetch plugin against `httptest` servers, the WebSocket client against a test server (ordering, fragments, pings, closing handshakes) |
 | native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; `go test -run '^$' -bench . ./ui` times a frame |
-| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open, native UI (frames, clicks; on macOS typing, skipped while an input method is selected, and composing); on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
+| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open, native UI (frames, clicks, input methods replacing typed text, file drops, assistive technology reading and acting; on macOS typing, skipped while an input method is selected, and composing); on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
 
 The XDG variables let the URL scheme test check that GLib opens the scheme
 with the handler it registered; without them it writes to temporary
@@ -1300,4 +1326,6 @@ which npm allows only for packages that exist: the first release uses an
 | custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost` | `http://<scheme>.localhost` (the page's `location`) |
 | window.open | keeps the opener | independent window | independent window |
 | native UI surface | layer-backed NSView, frames from `CADisplayLink` (a timer at the display's rate before macOS 14), input methods through NSTextInputClient | GtkDrawingArea, GtkIMMulticontext | `MyGoSurface` child window, IMM32 |
+| native UI file drops | NSDraggingDestination | GTK drag destination (`text/uri-list`) | OLE `IDropTarget` |
+| native UI accessibility | `NSAccessibilityElement` subclasses | ATK objects (GObject types registered through purego), bridged to AT-SPI by GTK | UI Automation fragments (COM objects; assembly thunks for the methods taking doubles) |
 | native UI rendering | Metal, into a CAMetalLayer presenting with the Core Animation transaction | CPU, painted with cairo | Direct3D 11 (WARP without a GPU), flip-model swap chain |

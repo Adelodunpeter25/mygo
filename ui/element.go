@@ -80,6 +80,7 @@ const (
 	flagDraggable
 	flagHover
 	flagOwnRing
+	flagDropTarget
 )
 
 type shadow struct {
@@ -173,6 +174,16 @@ type Element struct {
 	// widget names the widget that used the element's state as it created
 	// it, which Key would then lose.
 	widget string
+
+	// What assistive technology sees: the role, whether a check box,
+	// radio or switch is off (1), on (2) or mixed (3), whether a pop-up
+	// shows, a value, and a range's minimum, maximum and value.
+	role     Role
+	checked  int8
+	expanded bool
+	accValue string
+	accRange [3]float64
+	hasRange bool
 
 	// Layout results, in DIPs relative to the window.
 	x, y, w, h float32

@@ -83,10 +83,20 @@ type surface struct {
 	inside    bool
 	ctrlClick bool // the primary button is down for a Control-click
 
-	textInput bool
-	caret     platform.RectF
+	// input is the state of the text input with the keyboard; marked is
+	// the input method's composition and markedSel its selection in it.
+	input     platform.TextInputState
 	marked    string
+	markedSel nsRange
 	keyDown   bool // in interpretKeyEvents: text typed with the key
+
+	// Accessibility: whether the content describes its frames, the last
+	// tree, the elements of its nodes and those at the top (an NSArray).
+	accessOn bool
+	access   platform.AccessTree
+	elements map[uint64]*accessElement
+	topLevel id
+	updating bool
 }
 
 func (w *window) createSurface(content NSRect) {
@@ -107,6 +117,8 @@ func (w *window) createSurface(content NSRect) {
 		send(s.link, "setPaused:", 1)
 		send(s.link, "addToRunLoop:forMode:", uintptr(send(class("NSRunLoop"), "mainRunLoop")), kCFRunLoopCommonModes)
 	}
+	// Files dragged from other apps.
+	send(s.view, "registerForDraggedTypes:", uintptr(nsArray(nsString("public.file-url"))))
 	w.surface = s
 	w.b.bySurface[s.view] = s
 }
@@ -117,6 +129,7 @@ func (s *surface) destroy() {
 		release(s.link)
 		s.link = 0
 	}
+	s.destroyAccess()
 	send(s.view, "removeTrackingArea:", uintptr(s.tracking))
 	release(s.tracking)
 	delete(s.w.b.bySurface, s.view)
@@ -244,13 +257,14 @@ func (s *surface) SetCursor(c platform.Cursor) {
 	}
 }
 
-func (s *surface) SetTextInput(active bool, caret platform.RectF) {
-	if s.textInput && !active && s.marked != "" {
+func (s *surface) SetTextInput(t platform.TextInputState) {
+	if s.input.Active && !t.Active && s.marked != "" {
 		s.marked = ""
 		send(send(s.view, "inputContext"), "discardMarkedText")
 	}
-	s.textInput, s.caret = active, caret
-	if active {
+	moved := t.Active != s.input.Active || t.Caret != s.input.Caret
+	s.input = t
+	if t.Active && moved {
 		send(send(s.view, "inputContext"), "invalidateCharacterCoordinates")
 	}
 }
@@ -271,10 +285,11 @@ func (w *window) surfaceKeyChanged(key bool) {
 	s.send(platform.SurfaceEvent{Kind: kind})
 }
 
-func (s *surface) send(ev platform.SurfaceEvent) {
-	if !s.w.closed {
-		s.w.h.SurfaceEvent(ev)
+func (s *surface) send(ev platform.SurfaceEvent) bool {
+	if s.w.closed {
+		return false
 	}
+	return s.w.h.SurfaceEvent(ev)
 }
 
 func eventMods(ev id) platform.Modifiers {
@@ -399,7 +414,37 @@ func registerSurfaceClass() {
 			}
 		})
 	}
-	classDef("MyGoSurfaceView", "NSView", []string{"NSTextInputClient"}, []objc.MethodDef{
+	dragged := func(self id, _ objc.SEL, info id) uint {
+		s := b().surfaceOf(self)
+		if s == nil {
+			return 0
+		}
+		x, y := s.dragPoint(info)
+		if s.send(platform.SurfaceEvent{Kind: platform.FileDragOver, X: x, Y: y}) {
+			return 1 // NSDragOperationCopy
+		}
+		return 0
+	}
+	methods := []objc.MethodDef{
+		// Files dragged from other apps.
+		method("draggingEntered:", dragged),
+		method("draggingUpdated:", dragged),
+		method("draggingExited:", func(self id, _ objc.SEL, info id) {
+			if s := b().surfaceOf(self); s != nil {
+				s.send(platform.SurfaceEvent{Kind: platform.FileDragLeave})
+			}
+		}),
+		method("prepareForDragOperation:", func(self id, _ objc.SEL, info id) bool { return true }),
+		method("performDragOperation:", func(self id, _ objc.SEL, info id) bool {
+			s := b().surfaceOf(self)
+			if s == nil {
+				return false
+			}
+			x, y := s.dragPoint(info)
+			return s.send(platform.SurfaceEvent{Kind: platform.FileDrop, X: x, Y: y, Files: draggedFiles(info)})
+		}),
+	}
+	classDef("MyGoSurfaceView", "NSView", []string{"NSTextInputClient"}, append(append(methods, accessViewMethods()...), []objc.MethodDef{
 		method("isFlipped", func(self id, _ objc.SEL) bool { return true }),
 		method("acceptsFirstResponder", func(self id, _ objc.SEL) bool { return true }),
 		method("acceptsFirstMouse:", func(self id, _ objc.SEL, ev id) bool { return true }),
@@ -497,7 +542,7 @@ func registerSurfaceClass() {
 			s.send(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: eventKey(ev), Mods: mods, Repeat: sendBool(ev, "isARepeat")})
 			// Input methods see the key while a text input has the focus;
 			// they answer with insertText: or setMarkedText:.
-			if s.textInput && mods&(platform.ModSuper|platform.ModCtrl) == 0 {
+			if s.input.Active && mods&(platform.ModSuper|platform.ModCtrl) == 0 {
 				s.keyDown = true
 				send(self, "interpretKeyEvents:", uintptr(nsArray(ev)))
 				s.keyDown = false
@@ -522,21 +567,21 @@ func registerSurfaceClass() {
 			return s != nil && s.marked != ""
 		}),
 		method("markedRange", func(self id, _ objc.SEL) nsRange {
-			if s := b().surfaceOf(self); s != nil && s.marked != "" {
-				return nsRange{Location: 0, Length: uint(utf16Len(s.marked))}
+			if s := b().surfaceOf(self); s != nil {
+				return s.markedRange()
 			}
 			return nsRange{Location: nsNotFound}
 		}),
 		method("selectedRange", func(self id, _ objc.SEL) nsRange {
-			return nsRange{Location: 0}
+			if s := b().surfaceOf(self); s != nil {
+				return s.selectedRange()
+			}
+			return nsRange{Location: nsNotFound}
 		}),
 		method("setMarkedText:selectedRange:replacementRange:", func(self id, _ objc.SEL, text id, selected, replacement nsRange) {
-			s := b().surfaceOf(self)
-			if s == nil {
-				return
+			if s := b().surfaceOf(self); s != nil {
+				s.setMarkedText(stringOf(text), selected, replacement)
 			}
-			s.marked = stringOf(text)
-			s.send(platform.SurfaceEvent{Kind: platform.TextComposition, Text: s.marked, Caret: runesBefore(s.marked, int(selected.Location))})
 		}),
 		method("unmarkText", func(self id, _ objc.SEL) {
 			if s := b().surfaceOf(self); s != nil && s.marked != "" {
@@ -545,19 +590,15 @@ func registerSurfaceClass() {
 			}
 		}),
 		method("validAttributesForMarkedText", func(self id, _ objc.SEL) id { return nsArray() }),
-		method("attributedSubstringForProposedRange:actualRange:", func(self id, _ objc.SEL, r nsRange, actual *nsRange) id { return 0 }),
+		method("attributedSubstringForProposedRange:actualRange:", func(self id, _ objc.SEL, r nsRange, actual *nsRange) id {
+			if s := b().surfaceOf(self); s != nil {
+				return s.substring(r, actual)
+			}
+			return 0
+		}),
 		method("insertText:replacementRange:", func(self id, _ objc.SEL, text id, replacement nsRange) {
-			s := b().surfaceOf(self)
-			if s == nil {
-				return
-			}
-			str := stringOf(text)
-			if s.marked != "" {
-				s.marked = ""
-				s.send(platform.SurfaceEvent{Kind: platform.TextComposition})
-			}
-			if str != "" {
-				s.send(platform.SurfaceEvent{Kind: platform.TextInput, Text: str})
+			if s := b().surfaceOf(self); s != nil {
+				s.insertText(stringOf(text), replacement)
 			}
 		}),
 		method("characterIndexForPoint:", func(self id, _ objc.SEL, p NSPoint) uint { return nsNotFound }),
@@ -566,11 +607,17 @@ func registerSurfaceClass() {
 			if s == nil {
 				return cgRect{}
 			}
-			c := s.caret
+			c := s.input.Caret
 			inWindow := msgConvertRectView(self, sel("convertRect:toView:"), NSRect{Origin: NSPoint{c.X, c.Y}, Size: NSSize{max(c.W, 1), c.H}}, 0)
 			screen := msgRectToRect(s.w.win, sel("convertRectToScreen:"), inWindow)
 			return cgRect{X: screen.Origin.X, Y: screen.Origin.Y, W: screen.Size.Width, H: screen.Size.Height}
 		}),
 		method("doCommandBySelector:", func(self id, _ objc.SEL, cmd objc.SEL) {}),
-	})
+	}...))
+}
+
+// dragPoint returns where a drag is, in the view's coordinates.
+func (s *surface) dragPoint(info id) (float64, float64) {
+	p := msgPointFromView(s.view, sel("convertPoint:fromView:"), msgPoint(info, sel("draggingLocation")), 0)
+	return p.X, p.Y
 }

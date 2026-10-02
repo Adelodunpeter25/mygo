@@ -132,7 +132,7 @@ func button(c *Context, label string, primary bool) *Element {
 func Link(c *Context, label, url string) *Element {
 	t := c.theme
 	e := Text(c, label).TextColor(t.Accent).Cursor(CursorPointer).Focusable()
-	e.widget = "Link"
+	e.widget, e.role = "Link", RoleLink
 	if e.Clicked() && url != "" {
 		c.rt.host.openURL(url)
 	}
@@ -152,12 +152,13 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 	t := c.theme
 	row := Row(c).Gap(8).Focusable().Shrink(0)
 	row.flags |= flagClickable | flagHover | flagOwnRing
-	row.widget = "Checkbox"
+	row.widget, row.role = "Checkbox", RoleCheckBox
 	if row.Clicked() {
 		*checked = !*checked
 		row.st.changed = true
 	}
 	on := *checked
+	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
 		box := Box(c).Size(16, 16).Radius(4).Shrink(0)
 		if on {
@@ -191,12 +192,13 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 	t := c.theme
 	row := Row(c).Gap(8).Focusable().Shrink(0)
 	row.flags |= flagClickable | flagHover | flagOwnRing
-	row.widget = "Radio"
+	row.widget, row.role = "Radio", RoleRadio
 	if row.Clicked() && *selected != value {
 		*selected = value
 		row.st.changed = true
 	}
 	on := *selected == value
+	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
 		dot := Box(c).Size(16, 16).Radius(8).Shrink(0)
 		if on {
@@ -229,11 +231,12 @@ func Switch(c *Context, on *bool) *Element {
 	t := c.theme
 	sw := Box(c).Size(36, 20).Radius(10).Focusable().Shrink(0)
 	sw.flags |= flagClickable | flagHover
-	sw.widget = "Switch"
+	sw.widget, sw.role = "Switch", RoleSwitch
 	if sw.Clicked() {
 		*on = !*on
 		sw.st.changed = true
 	}
+	sw.checked = 1 + int8(b2f(*on))
 	pos := sw.Animate("knob", b2f(*on), 140*time.Millisecond)
 	off := t.Border.Mix(t.Text, 0.15)
 	sw.Background(off.Mix(t.Accent, pos))
@@ -283,6 +286,7 @@ func Slider(c *Context, value *float64, lo, hi float64) *Element {
 	if hi > lo {
 		frac = float32((*value - lo) / (hi - lo))
 	}
+	s.role, s.hasRange, s.accRange = RoleSlider, true, [3]float64{lo, hi, *value}
 	s.Draw(func(p *Painter, r Rect) {
 		track := Rect{r.X + knob/2, r.Y + r.H/2 - 2, r.W - knob, 4}
 		p.Fill(track, t.Border.Mix(t.Text, 0.1), 2)
@@ -303,6 +307,7 @@ func Slider(c *Context, value *float64, lo, hi float64) *Element {
 func Progress(c *Context, value float64) *Element {
 	t := c.theme
 	e := Box(c).Height(6).Radius(3).Background(t.Border).Clip()
+	e.role, e.hasRange, e.accRange = RoleProgress, true, [3]float64{0, 1, value}
 	now := c.now
 	if value < 0 {
 		c.AnimationFrame()
@@ -339,7 +344,7 @@ func ScrollHorizontal(c *Context) *Element {
 // that only builds the rows in view, with row(i).
 func List(c *Context, n int, rowHeight float32, row func(i int)) *Element {
 	e := Scroll(c)
-	e.widget = "List"
+	e.widget, e.role = "List", RoleList
 	st := e.st
 	view := st.h
 	if view <= 0 {
@@ -423,7 +428,7 @@ func (e *Element) Tooltip(s string) *Element {
 	x, y := rt.pointerX+12, rt.pointerY+18
 	Overlay(c, func() {
 		tip := Box(c).Absolute().Left(x).Top(y).MaxWidth(320).Padding(5, 8).Radius(5).
-			Background(t.Text).TextColor(t.Background).FontSize(t.FontSize - 1).PassThrough()
+			Background(t.Text).TextColor(t.Background).FontSize(t.FontSize - 1).PassThrough().Role(RoleTooltip)
 		tip.Shadow(0, 2, 8, 0, RGBA(0, 0, 0, 0.2))
 		tip.Children(func() { Text(c, s) })
 		keepInWindow(c, tip, x, y, y-30)
@@ -455,7 +460,7 @@ func Modal(c *Context, open *bool, fn func()) *Element {
 			*open = false
 		}
 		back.Children(func() {
-			panel = Box(c).Padding(20).Gap(12).Radius(10).Background(t.Background).MaxWidth(c.w - 40).MaxHeight(c.h - 40)
+			panel = Box(c).Padding(20).Gap(12).Radius(10).Background(t.Background).MaxWidth(c.w - 40).MaxHeight(c.h - 40).Role(RoleDialog)
 			panel.Shadow(0, 10, 30, 0, RGBA(0, 0, 0, 0.3))
 			panel.flags |= flagClickable
 			panel.Children(fn)
@@ -480,7 +485,7 @@ func Popover(c *Context, anchor *Element, open *bool, fn func()) *Element {
 			*open = false
 		}
 		panel = Box(c).Absolute().Left(b.X).Top(b.Y+b.H+4).MinWidth(b.W).Padding(4).Radius(t.Radius+2).
-			Background(t.Background).Border(1, t.Border)
+			Background(t.Background).Border(1, t.Border).Role(RolePopup)
 		panel.Shadow(0, 6, 20, 0, RGBA(0, 0, 0, 0.18))
 		panel.flags |= flagClickable
 		panel.Children(fn)
@@ -493,12 +498,13 @@ func Popover(c *Context, anchor *Element, open *bool, fn func()) *Element {
 func Select(c *Context, selected *string, options []string) *Element {
 	t := c.theme
 	b := Button(c, "")
-	b.widget = "Select"
+	b.widget, b.role, b.accValue = "Select", RolePopUpButton, *selected
 	b.Justify(SpaceBetween).MinWidth(140)
 	open := Local(b, "open", func() bool { return false })
 	if b.Clicked() {
 		*open = !*open
 	}
+	b.expanded = *open
 	b.Children(func() {
 		Text(c, *selected).SingleLine()
 		Box(c).Size(10, 10).Shrink(0).Draw(func(p *Painter, r Rect) {

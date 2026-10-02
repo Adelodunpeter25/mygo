@@ -1,7 +1,7 @@
 // Gallery tours MyGo's own user interface toolkit: a window drawn on the
 // GPU from Go, without a web page. It shows layout, the widgets, text
-// editing, a list of ten thousand rows, custom drawing, overlays and
-// updates from other goroutines.
+// editing, a list of ten thousand rows, custom drawing, overlays, file
+// drops and updates from other goroutines.
 //
 //	go run ./examples/gallery
 package main
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type gallery struct {
 	picked  int
 	dialog  bool
 	menu    bool
+	files   []string
 	now     time.Time
 	samples []float64
 }
@@ -122,6 +124,28 @@ func (g *gallery) overview(c *ui.Context) {
 			ui.Text(c, "A goroutine pushes a sample every 200 ms with Window.Update.").TextColor(t.TextMuted).MaxWidth(260)
 			g.sparkline(c).Size(260, 80)
 		})
+		card(c, "Files", func() {
+			zone := ui.Column(c).Size(260, 80).Padding(8, 12).Gap(2).Radius(6).Background(t.Surface).
+				Border(1, t.Border).Justify(ui.Center).AlignItems(ui.Center)
+			if files := zone.DroppedFiles(); files != nil {
+				g.files = files
+			}
+			if zone.FileDragOver() {
+				zone.Border(2, t.Accent)
+			}
+			zone.Children(func() {
+				if len(g.files) == 0 {
+					ui.Text(c, "Drop files here").TextColor(t.TextMuted)
+				}
+				for i, f := range g.files {
+					if i == 3 {
+						ui.Text(c, fmt.Sprintf("and %d more", len(g.files)-i)).FontSize(12).TextColor(t.TextMuted)
+						break
+					}
+					ui.Text(c, filepath.Base(f)).FontSize(12).MaxLines(1)
+				}
+			})
+		})
 	})
 }
 
@@ -150,7 +174,7 @@ func (g *gallery) controls(c *ui.Context) {
 	card(c, "Choices", func() {
 		ui.Checkbox(c, &g.agree, "I agree to the terms")
 		ui.Row(c).Gap(10).Children(func() {
-			ui.Switch(c, &g.notify)
+			ui.Switch(c, &g.notify).Label("Notifications")
 			ui.Text(c, map[bool]string{true: "Notifications on", false: "Notifications off"}[g.notify])
 		})
 		ui.Row(c).Gap(18).Children(func() {
@@ -165,7 +189,7 @@ func (g *gallery) controls(c *ui.Context) {
 	})
 	card(c, "Ranges", func() {
 		ui.Row(c).Gap(12).Children(func() {
-			ui.Slider(c, &g.volume, 0, 100).Grow(1)
+			ui.Slider(c, &g.volume, 0, 100).Label("Volume").Grow(1)
 			ui.Textf(c, "%3.0f%%", g.volume).Width(48).TextAlign(ui.End)
 		})
 		ui.Progress(c, g.volume/100)
@@ -187,14 +211,14 @@ func (g *gallery) text(c *ui.Context) {
 	card(c, "Form", func() {
 		label := func(s string) { ui.Text(c, s).FontSize(12).Bold().TextColor(t.TextMuted) }
 		label("Name")
-		ui.TextInput(c, &g.name).Placeholder("Ada Lovelace")
+		ui.TextInput(c, &g.name).Placeholder("Ada Lovelace").Label("Name")
 		label("Email")
-		in := ui.TextInput(c, &g.email).Placeholder("ada@example.com")
+		in := ui.TextInput(c, &g.email).Placeholder("ada@example.com").Label("Email")
 		if in.Submitted() {
 			g.dialog = true
 		}
 		label("About you")
-		ui.TextArea(c, &g.bio).Placeholder("Multiple lines, with undo, selection and input methods.").Height(110)
+		ui.TextArea(c, &g.bio).Placeholder("Multiple lines, with undo, selection and input methods.").Label("About you").Height(110)
 		ui.Textf(c, "%d characters", len([]rune(g.bio))).FontSize(12).TextColor(t.TextMuted)
 	})
 	card(c, "Typography", func() {
@@ -209,7 +233,7 @@ func (g *gallery) text(c *ui.Context) {
 
 func (g *gallery) list(c *ui.Context) {
 	t := c.Theme()
-	ui.TextInput(c, &g.filter).Placeholder("Filter 10,000 rows")
+	ui.TextInput(c, &g.filter).Placeholder("Filter 10,000 rows").Label("Filter")
 	var rows []int
 	for i := 0; i < 10000; i++ {
 		if g.filter == "" || strings.Contains(fmt.Sprint(i), g.filter) {

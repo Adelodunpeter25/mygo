@@ -25,6 +25,10 @@ type editEvent struct {
 	key   Key
 	text  string
 	caret int
+	// replace makes an insertion or a composition take the runes from to
+	// to instead of the selection, as an input method asked.
+	replace  bool
+	from, to int
 }
 
 type snapshot struct {
@@ -531,6 +535,9 @@ func (ed *editor) caretRect(st *state) Rect {
 func (ed *editor) process(c *Context, e *Element) {
 	st := e.st
 	for _, ev := range ed.queue {
+		if ev.replace {
+			ed.anchor, ed.caret = min(ev.from, len(ed.text)), min(ev.to, len(ed.text))
+		}
 		switch ev.kind {
 		case editKey:
 			ed.commitCompose()

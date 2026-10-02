@@ -87,6 +87,7 @@ type surface struct {
 
 	textInput bool
 	caret     platform.RectF
+	input     platform.TextInputState
 }
 
 // GDK event masks of the drawing area.
@@ -96,7 +97,7 @@ func (w *window) createSurface() {
 	loadSurface()
 	data := ptr(w.id)
 	s := &surface{w: w}
-	s.area = gtkDrawingAreaNew()
+	s.area = newSurfaceArea()
 	gtkWidgetSetCanFocus(s.area, true)
 	gtkWidgetAddEvents(s.area, surfaceEvents)
 	s.im = gtkIMMulticontextNew()
@@ -121,6 +122,7 @@ func (w *window) createSurface() {
 	connect(s.im, "commit", cbIMCommit, data)
 	connect(s.im, "preedit-changed", cbIMPreedit, data)
 	connect(s.im, "preedit-end", cbIMPreeditEnd, data)
+	s.connectSystem(data)
 	w.surface = s
 }
 
@@ -205,7 +207,9 @@ func (s *surface) SetCursor(c platform.Cursor) {
 	gdkWindowSetCursor(win, cur)
 }
 
-func (s *surface) SetTextInput(active bool, caret platform.RectF) {
+func (s *surface) SetTextInput(t platform.TextInputState) {
+	active, caret := t.Active, t.Caret
+	s.input = t
 	if s.textInput && !active {
 		gtkIMContextReset(s.im)
 	}
@@ -216,10 +220,11 @@ func (s *surface) SetTextInput(active bool, caret platform.RectF) {
 	}
 }
 
-func (s *surface) send(ev platform.SurfaceEvent) {
-	if !s.w.closed {
-		s.w.h.SurfaceEvent(ev)
+func (s *surface) send(ev platform.SurfaceEvent) bool {
+	if s.w.closed {
+		return false
 	}
+	return s.w.h.SurfaceEvent(ev)
 }
 
 func gdkMods(state uint32) platform.Modifiers {

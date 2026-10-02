@@ -18,26 +18,28 @@ type headless struct {
 	dark        bool
 	clipboard   string
 	cursor      Cursor
-	ime         bool
+	ime         platform.TextInputState
 	opened      []string
 	bar         TitleBar
+	access      *platform.AccessTree
 }
 
 func (h *headless) size() (float32, float32, float32) { return h.w, h.h, h.scale }
 func (h *headless) present(s *scene.Scene) {
 	h.img.Render(s)
 }
-func (h *headless) requestFrame()                    { h.requested = true }
-func (h *headless) setCursor(c Cursor)               { h.cursor = c }
-func (h *headless) setTextInput(active bool, _ Rect) { h.ime = active }
-func (h *headless) readClipboard() string            { return h.clipboard }
-func (h *headless) writeClipboard(s string)          { h.clipboard = s }
-func (h *headless) startDrag()                       {}
-func (h *headless) titleBarDoubleClicked()           {}
-func (h *headless) isDark() bool                     { return h.dark }
-func (h *headless) titleBar() TitleBar               { return h.bar }
-func (h *headless) invalidate()                      { h.requested = true }
-func (h *headless) openURL(u string)                 { h.opened = append(h.opened, u) }
+func (h *headless) requestFrame()                              { h.requested = true }
+func (h *headless) setCursor(c Cursor)                         { h.cursor = c }
+func (h *headless) setTextInput(t platform.TextInputState)     { h.ime = t }
+func (h *headless) updateAccessibility(t *platform.AccessTree) { h.access = t }
+func (h *headless) readClipboard() string                      { return h.clipboard }
+func (h *headless) writeClipboard(s string)                    { h.clipboard = s }
+func (h *headless) startDrag()                                 {}
+func (h *headless) titleBarDoubleClicked()                     {}
+func (h *headless) isDark() bool                               { return h.dark }
+func (h *headless) titleBar() TitleBar                         { return h.bar }
+func (h *headless) invalidate()                                { h.requested = true }
+func (h *headless) openURL(u string)                           { h.opened = append(h.opened, u) }
 func (h *headless) image() *image.RGBA {
 	m := &h.img.Image
 	return &image.RGBA{Pix: m.RGBA(), Stride: 4 * m.W, Rect: image.Rect(0, 0, m.W, m.H)}

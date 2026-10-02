@@ -121,6 +121,49 @@ func topNonClient(w *mygo.Window) (px, want int32, supported bool) {
 // A Control-click is a secondary click on macOS only.
 func controlClick(*mygo.Window, float64, float64) bool { return false }
 
+// composeOver does what an input method that converts typed text again
+// does through IMM32: it settles the range it reconverts, then composes or
+// commits.
+func composeOver(w *mygo.Window, text string, caret int, commit bool, from, length int) (ok bool) {
+	mygo.RunOnMain(func() { ok = win.TestComposeOver(w.NativeHandle(), text, caret, commit, from, length) })
+	return ok
+}
+
+// inputClient returns the selection and the text around it that input
+// methods get with IMR_DOCUMENTFEED, which holds no composition.
+func inputClient(w *mygo.Window) (selected [2]int, document string, ok bool) {
+	mygo.RunOnMain(func() {
+		var start, length int
+		document, start, length, ok = win.TestDocumentFeed(w.NativeHandle())
+		selected = [2]int{start, length}
+	})
+	return selected, document, ok
+}
+
+func dropFiles(w *mygo.Window, x, y float64, paths []string) (over, dropped, ok bool) {
+	mygo.RunOnMain(func() { over, dropped = win.TestDropFiles(w.NativeHandle(), x, y, paths) })
+	return over, dropped, true
+}
+
+// The control types of elements in UI Automation.
+const roleText, roleButton, roleCheckBox, roleTextField, roleSlider = "Text", "Button", "CheckBox", "Edit", "Slider"
+
+func accessibility(w *mygo.Window) (nodes []accessNode, ok bool) {
+	mygo.RunOnMain(func() {
+		var list []win.TestAccessNode
+		list, ok = win.TestAccessibility(w.NativeHandle())
+		for _, n := range list {
+			nodes = append(nodes, accessNode{n.Role, n.Label, n.Value})
+		}
+	})
+	return nodes, ok
+}
+
+func accessPerform(w *mygo.Window, label, action, value string) (ok bool) {
+	mygo.RunOnMain(func() { ok = win.TestAccessibilityPerform(w.NativeHandle(), label, action, value) })
+	return ok
+}
+
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
 func compose(*mygo.Window, string, int, bool) bool             { return false }

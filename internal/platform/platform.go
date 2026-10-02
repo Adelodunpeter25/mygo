@@ -415,8 +415,9 @@ type WindowHandler interface {
 	PermissionRequested(kinds []string, origin string) bool
 
 	// SurfaceEvent delivers input on the window's Surface, and changes of
-	// it.
-	SurfaceEvent(ev SurfaceEvent)
+	// it. For FileDragOver and FileDrop it reports whether the content
+	// takes the files where they are; it returns false for other events.
+	SurfaceEvent(ev SurfaceEvent) bool
 }
 
 // Navigation describes a pending navigation.

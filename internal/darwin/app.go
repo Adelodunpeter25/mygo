@@ -26,6 +26,7 @@ type Backend struct {
 	byWebView  map[id]*window
 	byNSWindow map[id]*window
 	bySurface  map[id]*surface
+	byAccess   map[id]*accessElement
 
 	menuTarget id
 	menuItems  map[int][]id
@@ -58,6 +59,7 @@ func New() *Backend {
 		byWebView:  map[id]*window{},
 		byNSWindow: map[id]*window{},
 		bySurface:  map[id]*surface{},
+		byAccess:   map[id]*accessElement{},
 		menuItems:  map[int][]id{},
 		trays:      map[id]*tray{},
 		hotkeys:    map[int]uintptr{},
@@ -213,6 +215,7 @@ func registerClasses() {
 	registerAppDelegate()
 	registerWindowClasses()
 	registerSurfaceClass()
+	registerAccessClass()
 	registerMenuTarget()
 	registerSchemeHandler()
 	registerTrayTarget()

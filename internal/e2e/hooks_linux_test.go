@@ -146,6 +146,49 @@ func topNonClient(*mygo.Window) (int32, int32, bool) { return 0, 0, false }
 // A Control-click is a secondary click on macOS only.
 func controlClick(*mygo.Window, float64, float64) bool { return false }
 
+// composeOver does what an input method that edits typed text does through
+// GTK: it deletes the text around the caret it composes over, then
+// composes or commits.
+func composeOver(w *mygo.Window, text string, caret int, commit bool, from, length int) (ok bool) {
+	mygo.RunOnMain(func() { ok = linux.TestComposeOver(w.NativeHandle(), text, caret, commit, from, length) })
+	return ok
+}
+
+// inputClient returns the caret and the text around it that input methods
+// get through GTK, which knows no selection, and no composition in it.
+func inputClient(w *mygo.Window) (selected [2]int, document string, ok bool) {
+	mygo.RunOnMain(func() {
+		var caret int
+		document, caret, ok = linux.TestSurrounding(w.NativeHandle())
+		selected = [2]int{caret, 0}
+	})
+	return selected, document, ok
+}
+
+func dropFiles(w *mygo.Window, x, y float64, paths []string) (over, dropped, ok bool) {
+	mygo.RunOnMain(func() { over, dropped = linux.TestDropFiles(w.NativeHandle(), x, y, paths) })
+	return over, dropped, true
+}
+
+// The roles of elements in ATK.
+const roleText, roleButton, roleCheckBox, roleTextField, roleSlider = "label", "button", "check box", "entry", "slider"
+
+func accessibility(w *mygo.Window) (nodes []accessNode, ok bool) {
+	mygo.RunOnMain(func() {
+		var list []linux.TestAccessNode
+		list, ok = linux.TestAccessibility(w.NativeHandle())
+		for _, n := range list {
+			nodes = append(nodes, accessNode{n.Role, n.Label, n.Value})
+		}
+	})
+	return nodes, ok
+}
+
+func accessPerform(w *mygo.Window, label, action, value string) (ok bool) {
+	mygo.RunOnMain(func() { ok = linux.TestAccessibilityPerform(w.NativeHandle(), label, action, value) })
+	return ok
+}
+
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
 func compose(*mygo.Window, string, int, bool) bool             { return false }

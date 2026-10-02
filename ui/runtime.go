@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/scene"
 	"github.com/egoist/mygo/internal/text"
 )
@@ -15,7 +16,8 @@ type host interface {
 	present(s *scene.Scene)
 	requestFrame()
 	setCursor(Cursor)
-	setTextInput(active bool, caret Rect)
+	setTextInput(t platform.TextInputState)
+	updateAccessibility(tree *platform.AccessTree)
 	readClipboard() string
 	writeClipboard(string)
 	startDrag()
@@ -63,10 +65,16 @@ type engine struct {
 	wakeAt    time.Time
 	timer     *time.Timer
 	cursor    Cursor
-	ime       struct {
-		active bool
-		r      Rect
+	// ime is the text input state the host has, and base the rune of the
+	// focused editor its text starts at.
+	ime struct {
+		state platform.TextInputState
+		base  int
 	}
+	// dropOver is the element files are dragged over; access is true once
+	// assistive technology asked for the content.
+	dropOver     uint64
+	access       bool
 	blinkStart   time.Time
 	inFrame      bool
 	dark         bool
@@ -182,6 +190,9 @@ func (rt *engine) runFrame() {
 	rt.regs, rt.nextRegs = rt.nextRegs, rt.regs
 	rt.updateTextInput()
 	rt.updateCursor()
+	if rt.access {
+		rt.host.updateAccessibility(rt.accessTree())
+	}
 	if rt.animating {
 		rt.host.requestFrame()
 	}
@@ -197,6 +208,7 @@ func (rt *engine) endPass() {
 		s.clicks, s.rightClicks, s.doubleClicks = 0, 0, 0
 		s.dragX, s.dragY = 0, 0
 		s.changed, s.submitted = false, false
+		s.dropped = nil
 	}
 	rt.delivered = rt.delivered[:0]
 }

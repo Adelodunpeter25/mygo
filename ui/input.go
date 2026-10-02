@@ -8,8 +8,9 @@ import (
 	"github.com/egoist/mygo/internal/platform"
 )
 
-// event handles a surface event on the main thread.
-func (rt *engine) event(ev platform.SurfaceEvent) {
+// event handles a surface event on the main thread. It reports whether
+// an element takes files dragged over or dropped at the event's position.
+func (rt *engine) event(ev platform.SurfaceEvent) (taken bool) {
 	x, y := float32(ev.X), float32(ev.Y)
 	switch ev.Kind {
 	case platform.SurfaceFrame:
@@ -35,9 +36,9 @@ func (rt *engine) event(ev platform.SurfaceEvent) {
 	case platform.KeyPressed:
 		rt.keyDown(Modifiers(ev.Mods), Key(ev.Key))
 	case platform.TextInput:
-		rt.editEvent(editEvent{kind: editInsert, text: ev.Text})
+		rt.editEvent(rt.replaced(editEvent{kind: editInsert, text: ev.Text}, ev))
 	case platform.TextComposition:
-		rt.editEvent(editEvent{kind: editCompose, text: ev.Text, caret: ev.Caret})
+		rt.editEvent(rt.replaced(editEvent{kind: editCompose, text: ev.Text, caret: ev.Caret}, ev))
 	case platform.SurfaceCommand:
 		rt.editEvent(editEvent{kind: editCommand, text: ev.Text})
 	case platform.SurfaceFocus:
@@ -51,6 +52,16 @@ func (rt *engine) event(ev platform.SurfaceEvent) {
 			rt.pressed = nil
 		}
 		rt.requestFrame()
+	case platform.FileDragOver:
+		taken = rt.fileDrag(x, y)
+	case platform.FileDragLeave:
+		rt.fileDrag(-1, -1)
+	case platform.FileDrop:
+		taken = rt.fileDrop(x, y, ev.Files)
+	case platform.AccessibilityOn:
+		rt.accessibilityOn()
+	case platform.AccessAction:
+		rt.accessAction(ev)
 	}
 	if ev.Kind != platform.SurfaceFrame {
 		// A press or Tab may have moved the focus: tell the host now, not
@@ -58,6 +69,7 @@ func (rt *engine) event(ev platform.SurfaceEvent) {
 		// never reach the input method.
 		rt.updateTextInput()
 	}
+	return taken
 }
 
 // hitChain returns the ids of the topmost element at (x, y) and of its
@@ -500,18 +512,41 @@ func (rt *engine) editEvent(ev editEvent) {
 	rt.requestFrame()
 }
 
-// updateTextInput tells the host where text input goes.
+// imeContext is how many runes around the selection input methods see.
+const imeContext = 512
+
+// updateTextInput tells the host where text input goes, and the text
+// around the caret.
 func (rt *engine) updateTextInput() {
-	active := false
-	var r Rect
+	var t platform.TextInputState
+	base := 0
 	if s := rt.states[rt.focused]; s != nil && s.editor != nil && s.flags&flagEditable != 0 && rt.windowFocused {
-		active = true
-		r = s.editor.caretRect(s)
+		ed := s.editor
+		r := ed.caretRect(s)
+		t.Active = true
+		t.Caret = platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)}
+		if !ed.password {
+			a, z := ed.selection()
+			base = max(0, a-imeContext)
+			end := min(len(ed.text), z+imeContext)
+			t.Text, t.Start, t.End = string(ed.text[base:end]), a-base, z-base
+		}
 	}
-	if active != rt.ime.active || r != rt.ime.r {
-		rt.ime.active, rt.ime.r = active, r
-		rt.host.setTextInput(active, r)
+	if t != rt.ime.state {
+		rt.ime.state, rt.ime.base = t, base
+		rt.host.setTextInput(t)
 	}
+}
+
+// replaced makes an edit replace the runes an input method named, from
+// the text it was last given, rather than the selection.
+func (rt *engine) replaced(ev editEvent, sev platform.SurfaceEvent) editEvent {
+	if sev.Replace && rt.ime.state.Active {
+		n := len([]rune(rt.ime.state.Text))
+		from, to := max(0, min(sev.From, n)), max(0, min(sev.To, n))
+		ev.replace, ev.from, ev.to = true, rt.ime.base+min(from, to), rt.ime.base+max(from, to)
+	}
+	return ev
 }
 
 func abs32(v float32) float32 {

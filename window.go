@@ -1369,7 +1369,9 @@ func (w *Window) OnResize(fn func()) (off func()) { return w.onResize.add(fn, fa
 
 // OnFileDrop is called when files, for example from Finder or Explorer, are
 // dropped on the page, with their paths. The app's own pages also get them,
-// through onFileDrop of mygo-runtime.
+// through onFileDrop of mygo-runtime. In a window showing native UI, it
+// gets the files no element takes (ui.Element.DroppedFiles), with X and Y
+// in DIPs.
 //
 // The page's own drag and drop keeps working: drop events still reach it
 // with the File objects, and drags that start in the page are left alone.

@@ -1086,23 +1086,9 @@ func initWindowCallbacks() {
 	// WebKit asks for the data of a drag while it moves over the page,
 	// before the drop; the uri-list of files gives their paths.
 	cbDragData = purego.NewCallback(func(widget, context ptr, x, y int32, sel ptr, info, time uint32, data ptr) {
-		w := b().window(data)
-		uris := gtkSelectionDataGetUris(sel)
-		if w == nil || uris == 0 {
-			return
+		if w := b().window(data); w != nil {
+			w.dragged = selectionPaths(sel)
 		}
-		defer gStrfreev(uris)
-		var paths []string
-		for i := uintptr(0); ; i++ {
-			uri := *(*ptr)(unsafe.Add(*(*unsafe.Pointer)(unsafe.Pointer(&uris)), i*unsafe.Sizeof(uris)))
-			if uri == 0 {
-				break
-			}
-			if p := takeStr(gFilenameFromURI(goStr(uri), 0, 0)); p != "" {
-				paths = append(paths, p)
-			}
-		}
-		w.dragged = paths
 	})
 	// Runs before WebKit's own handler, which gets the drop to the page.
 	cbDragDrop = purego.NewCallback(func(widget, context ptr, x, y int32, time uint32, data ptr) bool {

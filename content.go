@@ -133,11 +133,27 @@ func (w *Window) captureContent() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// SurfaceEvent passes the surface's events to the Content.
-func (h *windowHandler) SurfaceEvent(ev platform.SurfaceEvent) {
-	if c := h.w.conn; c != nil && c.Event != nil {
-		c.Event(ev)
+// SurfaceEvent passes the surface's events to the Content. Files the
+// Content does not take go to OnFileDrop, when it has listeners.
+func (h *windowHandler) SurfaceEvent(ev platform.SurfaceEvent) bool {
+	c := h.w.conn
+	if c == nil || c.Event == nil {
+		return false
 	}
+	if c.Event(ev) {
+		return true
+	}
+	switch ev.Kind {
+	case platform.FileDragOver:
+		return h.w.onFileDrop.len() > 0
+	case platform.FileDrop:
+		if h.w.onFileDrop.len() == 0 {
+			return false
+		}
+		fire1(&h.w.onFileDrop, &FileDropEvent{Paths: ev.Files, X: int(ev.X), Y: int(ev.Y)})
+		return true
+	}
+	return false
 }
 
 // contentCommand performs an edit command (an Edit menu role: "copy",

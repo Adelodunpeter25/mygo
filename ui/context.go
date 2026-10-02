@@ -233,6 +233,7 @@ type state struct {
 	contentH         float32
 
 	changed, submitted bool
+	dropped            []string
 	editor             *editor
 	locals             map[any]any
 	anims              map[any]*anim

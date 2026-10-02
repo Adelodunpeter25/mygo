@@ -639,8 +639,9 @@ type Surface struct {
 	pixW      int
 	pixH      int
 	cursor    platform.Cursor
-	textInput bool
-	caret     platform.RectF
+	textInput platform.TextInputState
+	access    *platform.AccessTree
+	accessN   int
 }
 
 func (s *Surface) Native() platform.SurfaceNative { return platform.SurfaceNative{} }
@@ -674,14 +675,22 @@ func (s *Surface) SetCursor(c platform.Cursor) {
 	s.mu.Unlock()
 }
 
-func (s *Surface) SetTextInput(active bool, caret platform.RectF) {
+func (s *Surface) SetTextInput(t platform.TextInputState) {
 	s.mu.Lock()
-	s.textInput, s.caret = active, caret
+	s.textInput = t
 	s.mu.Unlock()
 }
 
-// Send delivers an event to the window's content, on the main thread.
-func (s *Surface) Send(ev platform.SurfaceEvent) { s.w.H.SurfaceEvent(ev) }
+func (s *Surface) UpdateAccessibility(tree *platform.AccessTree) {
+	s.mu.Lock()
+	s.access = tree
+	s.accessN++
+	s.mu.Unlock()
+}
+
+// Send delivers an event to the window's content, on the main thread, and
+// returns what the content answered.
+func (s *Surface) Send(ev platform.SurfaceEvent) bool { return s.w.H.SurfaceEvent(ev) }
 
 // Frame draws a frame when the content asked for one since the last, as
 // the display would, and reports whether it did.
@@ -726,5 +735,20 @@ func (s *Surface) Cursor() platform.Cursor {
 func (s *Surface) TextInput() (bool, platform.RectF) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.textInput, s.caret
+	return s.textInput.Active, s.textInput.Caret
+}
+
+// TextInputState returns the last state of text input the content set.
+func (s *Surface) TextInputState() platform.TextInputState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.textInput
+}
+
+// Accessibility returns the last accessibility tree the content gave, and
+// how many it gave.
+func (s *Surface) Accessibility() (*platform.AccessTree, int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.access, s.accessN
 }

@@ -126,8 +126,8 @@ func dropFiles(w *mygo.Window, x, y float64, paths []string) (over, dropped, ok 
 	return over, dropped, true
 }
 
-// accessNode is an element as assistive technology reads it.
-type accessNode struct{ role, label, value string }
+// The roles of elements in the accessibility API of AppKit.
+const roleText, roleButton, roleCheckBox, roleTextField, roleSlider = "AXStaticText", "AXButton", "AXCheckBox", "AXTextField", "AXSlider"
 
 func accessibility(w *mygo.Window) (nodes []accessNode, ok bool) {
 	mygo.RunOnMain(func() {

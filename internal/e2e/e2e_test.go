@@ -1795,9 +1795,15 @@ func TestContentWindowInputMethod(t *testing.T) {
 		return sel == [2]int{4, 0} && doc == "cafe"
 	})
 	composeOver(w, "e", 1, false, 3, 1)
+	// The text input methods get on macOS holds what they compose, the text
+	// they get through GTK does not.
+	doc, sel := "cafe", [2]int{4, 0}
+	if runtime.GOOS == "linux" {
+		doc, sel = "caf", [2]int{3, 0}
+	}
 	eventually(t, "the composition over the e", func() bool {
-		sel, doc, _ := inputClient(w)
-		return text() == "caf" && doc == "cafe" && sel == [2]int{4, 0}
+		s, d, _ := inputClient(w)
+		return text() == "caf" && d == doc && s == sel
 	})
 	composeOver(w, "é", 1, true, -1, 0)
 	eventually(t, "the accented letter", func() bool { return text() == "café" })
@@ -1841,6 +1847,9 @@ func TestContentWindowFileDrop(t *testing.T) {
 	}
 }
 
+// accessNode is an element as assistive technology reads it.
+type accessNode struct{ role, label, value string }
+
 // TestContentWindowAccessibility reads native UI as assistive technology,
 // such as VoiceOver, does, and acts on it.
 func TestContentWindowAccessibility(t *testing.T) {
@@ -1874,8 +1883,8 @@ func TestContentWindowAccessibility(t *testing.T) {
 		}
 		return accessNode{}, false
 	}
-	want := []accessNode{{"AXStaticText", "Settings", "Settings"}, {"AXButton", "Save", ""}, {"AXCheckBox", "Agree", "0"},
-		{"AXTextField", "Name", "Ada"}, {"AXSlider", "Volume", "30"}}
+	want := []accessNode{{roleText, "Settings", "Settings"}, {roleButton, "Save", ""}, {roleCheckBox, "Agree", "0"},
+		{roleTextField, "Name", "Ada"}, {roleSlider, "Volume", "30"}}
 	for _, n := range want {
 		eventually(t, n.role+" "+n.label, func() bool {
 			got, ok := find(n.role, n.label)
@@ -1892,7 +1901,7 @@ func TestContentWindowAccessibility(t *testing.T) {
 	})
 	accessPerform(w, "Agree", "press", "")
 	eventually(t, "the check box checked", func() bool {
-		n, _ := find("AXCheckBox", "Agree")
+		n, _ := find(roleCheckBox, "Agree")
 		return n.value == "1"
 	})
 	accessPerform(w, "Name", "value", "Grace")

@@ -25,7 +25,7 @@ type AccessNode struct {
 	Bounds RectF
 	States AccessStates
 	// Min, Max and Now are the range and the value of a slider or a
-	// progress bar.
+	// progress bar; Now is below Min for progress of unknown length.
 	Min, Max, Now float64
 	// SelStart and SelEnd are the selection of a text field, in runes,
 	// and Placeholder what it shows while empty.

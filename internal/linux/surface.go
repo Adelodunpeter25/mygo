@@ -97,7 +97,7 @@ func (w *window) createSurface() {
 	loadSurface()
 	data := ptr(w.id)
 	s := &surface{w: w}
-	s.area = gtkDrawingAreaNew()
+	s.area = newSurfaceArea()
 	gtkWidgetSetCanFocus(s.area, true)
 	gtkWidgetAddEvents(s.area, surfaceEvents)
 	s.im = gtkIMMulticontextNew()
@@ -122,6 +122,7 @@ func (w *window) createSurface() {
 	connect(s.im, "commit", cbIMCommit, data)
 	connect(s.im, "preedit-changed", cbIMPreedit, data)
 	connect(s.im, "preedit-end", cbIMPreeditEnd, data)
+	s.connectSystem(data)
 	w.surface = s
 }
 

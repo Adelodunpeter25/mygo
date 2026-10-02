@@ -74,8 +74,7 @@ func dropFiles(*mygo.Window, float64, float64, []string) (bool, bool, bool) {
 func accessibility(*mygo.Window) ([]accessNode, bool)         { return nil, false }
 func accessPerform(*mygo.Window, string, string, string) bool { return false }
 
-// accessNode is an element as assistive technology reads it.
-type accessNode struct{ role, label, value string }
+const roleText, roleButton, roleCheckBox, roleTextField, roleSlider = "text", "button", "check box", "text field", "slider"
 
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }

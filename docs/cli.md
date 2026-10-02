@@ -70,9 +70,9 @@ place of its built frontend, and starts it. Without `devUrl` the app serves
 Changes to the Go code, the configuration, the icon or the resources rebuild
 the app, regenerate the TypeScript client and restart the app: the running
 build quits, then the new one starts, so the two never hold the same files,
-locks or profile at once. A build that fails to compile keeps the running
-one. Frontend changes are the dev server's to handle. Quitting the app, or
-Ctrl+C, ends mygo dev, and `App.Relaunch` restarts the app.
+locks or web view profile at once. A build that fails to compile keeps the
+running one. Frontend changes are the dev server's to handle. Quitting the
+app, or Ctrl+C, ends mygo dev, and `App.Relaunch` restarts the app.
 
 On Linux, an app with [`linux.cef`](distribution.md#chromium-cef) runs
 with CEF from the cache that `mygo build` uses, which the first run

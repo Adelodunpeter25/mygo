@@ -967,10 +967,11 @@ makes Cmd+C/V/Q work; other platforms get none unless the app sets one.
     when the executable, Info.plist and icon are unchanged nothing restarts.
     Otherwise the running build is sent SIGTERM (quit sequence), then
     SIGKILL after 3 s, and the new one starts once it has exited: builds
-    never overlap, so the single-instance lock, the CEF profile (Chromium
-    allows one process per profile) and the app's files are free. A build
-    that fails to compile leaves the old one running; one that fails to
-    start or get ready within 20 s leaves none until the next change.
+    never overlap, so the single-instance lock, the web view's profile and
+    the app's files are free. Only the app gets the SIGTERM, which lets it
+    end the processes it started; those left after it exits are killed. A
+    build that fails to compile leaves the old one running; one that fails
+    to start or get ready within 20 s leaves none until the next change.
   - *Watching.* Exactly what the build reads, from `go list -deps` after
     every build: the directories of the compiled packages outside GOROOT and
     the module cache (so local `replace` modules too), embedded files,

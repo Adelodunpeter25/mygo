@@ -94,7 +94,8 @@ type WindowOptions struct {
 	// buttons, and the desktop's button layout decides which show and on
 	// which side, possibly none. Pages keep clear of them with the
 	// --mygo-titlebar-* CSS variables and drag the window by their title
-	// bar with --app-region: drag, as in a frameless window.
+	// bar with --app-region: drag, as in a frameless window; native UI
+	// with ui.Context.TitleBar and ui.Element.DragWindow.
 	TitleBarStyle TitleBarStyle
 	// TrafficLightPosition moves the window controls of a window with a
 	// hidden title bar (macOS): the top-left corner of the close button
@@ -1533,7 +1534,12 @@ func (h *windowHandler) Maximized()         { h.w.stateChanged(); fire(&h.w.onMa
 func (h *windowHandler) Unmaximized()       { h.w.stateChanged(); fire(&h.w.onUnmaximize) }
 func (h *windowHandler) EnteredFullScreen() { h.w.stateChanged(); fire(&h.w.onEnterFullScreen) }
 func (h *windowHandler) LeftFullScreen()    { h.w.stateChanged(); fire(&h.w.onLeaveFullScreen) }
-func (h *windowHandler) TitleBarChanged()   { h.w.sendTitleBar() }
+func (h *windowHandler) TitleBarChanged() {
+	h.w.sendTitleBar()
+	if c := h.w.conn; c != nil && c.TitleBarChanged != nil {
+		c.TitleBarChanged()
+	}
+}
 
 // sendTitleBar tells the page of a window with a hidden title bar the room
 // its controls take. The backend's script tells the first page at document

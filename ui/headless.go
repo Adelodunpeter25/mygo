@@ -20,6 +20,7 @@ type headless struct {
 	cursor      Cursor
 	ime         bool
 	opened      []string
+	bar         TitleBar
 }
 
 func (h *headless) size() (float32, float32, float32) { return h.w, h.h, h.scale }
@@ -34,6 +35,7 @@ func (h *headless) writeClipboard(s string)          { h.clipboard = s }
 func (h *headless) startDrag()                       {}
 func (h *headless) titleBarDoubleClicked()           {}
 func (h *headless) isDark() bool                     { return h.dark }
+func (h *headless) titleBar() TitleBar               { return h.bar }
 func (h *headless) invalidate()                      { h.requested = true }
 func (h *headless) openURL(u string)                 { h.opened = append(h.opened, u) }
 func (h *headless) image() *image.RGBA {
@@ -92,6 +94,13 @@ func (t *Tester) SetSize(width, height int) {
 func (t *Tester) SetScale(scale float32) {
 	t.h.scale = scale
 	t.settle()
+}
+
+// SetTitleBar sets the room the window controls of a window with a hidden
+// title bar take, which Context.TitleBar returns.
+func (t *Tester) SetTitleBar(bar TitleBar) {
+	t.h.bar = bar
+	t.Frame()
 }
 
 // SetDark switches between the light and the dark appearance.

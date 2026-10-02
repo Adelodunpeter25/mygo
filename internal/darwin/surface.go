@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"structs"
 	"sync"
+	"time"
 	"unicode/utf16"
 	"unsafe"
 
@@ -39,6 +40,7 @@ var (
 	surfaceOnce        sync.Once
 	msgConvertRectView func(obj id, sel objc.SEL, r NSRect, view id) NSRect
 	msgInitTracking    func(obj id, sel objc.SEL, r NSRect, options uint, owner, info id) id
+	msgTimer           func(cls id, sel objc.SEL, interval float64, target id, selector objc.SEL, info id, repeats bool) id
 	cgColorSpaceSRGB   uintptr
 	cgImageCreate      uintptr
 	cgImageRelease     uintptr
@@ -55,6 +57,7 @@ func loadSurface() {
 		}
 		purego.RegisterFunc(&msgConvertRectView, stret)
 		purego.RegisterFunc(&msgInitTracking, msgSendAddr)
+		purego.RegisterFunc(&msgTimer, msgSendAddr)
 		cgImageCreate = mustDlsym(libCG, "CGImageCreate")
 		cgImageRelease = mustDlsym(libCG, "CGImageRelease")
 		cgProviderCreate = mustDlsym(libCG, "CGDataProviderCreateWithCFData")
@@ -71,9 +74,13 @@ type surface struct {
 	view     id
 	tracking id
 	link     id // CADisplayLink (macOS 14), nil before
-	pending  bool
-	cursor   platform.Cursor
-	inside   bool
+	// Without a display link, a timer paces frames at the display's
+	// rate: timing is true while one is due, and lastFrame is when the
+	// last frame began.
+	timing    bool
+	lastFrame time.Time
+	cursor    platform.Cursor
+	inside    bool
 
 	textInput bool
 	caret     platform.RectF
@@ -149,7 +156,24 @@ func (s *surface) RequestFrame() {
 		send(s.link, "setPaused:", 0)
 		return
 	}
-	send(s.view, "setNeedsDisplay:", 1)
+	if s.timing {
+		return
+	}
+	// One refresh after the last frame, or at once after a pause.
+	fps := 60
+	if screen := send(s.w.win, "screen"); screen != 0 && respondsTo(screen, "maximumFramesPerSecond") {
+		fps = max(sendInt(screen, "maximumFramesPerSecond"), 30)
+	}
+	delay := time.Second/time.Duration(fps) - time.Since(s.lastFrame)
+	if delay <= 0 {
+		send(s.view, "setNeedsDisplay:", 1)
+		return
+	}
+	s.timing = true
+	withPool(func() {
+		t := msgTimer(class("NSTimer"), sel("timerWithTimeInterval:target:selector:userInfo:repeats:"), delay.Seconds(), s.view, sel("mygoTimer:"), 0, false)
+		send(send(class("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", uintptr(t), kCFRunLoopCommonModes)
+	})
 }
 
 func (s *surface) PresentPixels(pix []byte, stride, width, height int) {
@@ -347,12 +371,20 @@ func registerSurfaceClass() {
 		method("wantsUpdateLayer", func(self id, _ objc.SEL) bool { return true }),
 		method("updateLayer", func(self id, _ objc.SEL) {
 			if s := b().surfaceOf(self); s != nil {
+				s.lastFrame = time.Now()
 				s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
 			}
 		}),
 		method("mygoTick:", func(self id, _ objc.SEL, link id) {
 			send(link, "setPaused:", 1)
 			send(self, "setNeedsDisplay:", 1)
+		}),
+		method("mygoTimer:", func(self id, _ objc.SEL, timer id) {
+			// A closed window's view lives until its timer fires.
+			if s := b().surfaceOf(self); s != nil {
+				s.timing = false
+				send(self, "setNeedsDisplay:", 1)
+			}
 		}),
 		method("setFrameSize:", func(self id, cmd objc.SEL, size NSSize) {
 			objc.ID(self).SendSuper(cmd, size)

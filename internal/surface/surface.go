@@ -20,6 +20,9 @@ type Conn struct {
 	TitleBarDoubleClicked func()
 	// IsDark reports the system's dark appearance.
 	IsDark func() bool
+	// TitleBar returns the room the window controls take in a window with
+	// a hidden title bar, zero in other windows.
+	TitleBar func() platform.TitleBar
 	// OpenURL opens a link in the default browser.
 	OpenURL func(url string)
 	// Invalidate asks for a frame; it is safe from any goroutine.
@@ -28,8 +31,10 @@ type Conn struct {
 	// Event receives the surface's events, and Focus and Blur of the
 	// window.
 	Event func(ev platform.SurfaceEvent)
-	// ThemeChanged is called when the system appearance changes.
-	ThemeChanged func()
+	// ThemeChanged is called when the system appearance changes, and
+	// TitleBarChanged when TitleBar does.
+	ThemeChanged    func()
+	TitleBarChanged func()
 	// Capture renders the content as it is now into premultiplied RGBA.
 	Capture func() (width, height int, rgba []byte)
 	// Detach is called once the window is closed.

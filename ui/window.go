@@ -41,6 +41,7 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	h.rt = rt
 	conn.Event = rt.event
 	conn.ThemeChanged = rt.themeChanged
+	conn.TitleBarChanged = rt.requestFrame
 	conn.Capture = h.capture
 	conn.Detach = h.detach
 	// Load the fonts while the window shows up.
@@ -160,6 +161,14 @@ func (h *windowHost) titleBarDoubleClicked() {
 }
 
 func (h *windowHost) isDark() bool { return h.conn.IsDark != nil && h.conn.IsDark() }
+
+func (h *windowHost) titleBar() TitleBar {
+	if h.conn.TitleBar == nil {
+		return TitleBar{}
+	}
+	t := h.conn.TitleBar()
+	return TitleBar{Height: float32(t.Height), Left: float32(t.Left), Right: float32(t.Right)}
+}
 
 func (h *windowHost) invalidate() { h.conn.Invalidate() }
 

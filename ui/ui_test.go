@@ -206,6 +206,18 @@ func TestKeyOnAWidget(t *testing.T) {
 	}, 200, 100)
 }
 
+func TestTitleBar(t *testing.T) {
+	var got TitleBar
+	tt := NewTester(func(c *Context) { got = c.TitleBar() }, 200, 100)
+	if got != (TitleBar{}) {
+		t.Errorf("TitleBar without one = %+v", got)
+	}
+	tt.SetTitleBar(TitleBar{Height: 28, Left: 72})
+	if got != (TitleBar{Height: 28, Left: 72}) {
+		t.Errorf("TitleBar = %+v", got)
+	}
+}
+
 func TestListScrollsAndSelects(t *testing.T) {
 	d := &demo{}
 	tt := NewTester(d.view, 640, 600)

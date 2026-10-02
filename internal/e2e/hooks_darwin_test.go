@@ -95,3 +95,13 @@ func titleButtons(*mygo.Window) ([]string, bool) { return nil, false }
 func pressTitleButton(*mygo.Window, string) bool { return false }
 
 func topNonClient(*mygo.Window) (int32, int32, bool) { return 0, 0, false }
+
+func clickAndType(w *mygo.Window, x, y float64, text string) (ok bool) {
+	mygo.RunOnMain(func() { ok = darwin.TestClickAndType(w.NativeHandle(), x, y, text) })
+	return ok
+}
+
+func compose(w *mygo.Window, text string, caret int, commit bool) (ok bool) {
+	mygo.RunOnMain(func() { ok = darwin.TestCompose(w.NativeHandle(), text, caret, commit) })
+	return ok
+}

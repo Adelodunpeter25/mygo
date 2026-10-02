@@ -117,3 +117,7 @@ func topNonClient(w *mygo.Window) (px, want int32, supported bool) {
 	mygo.RunOnMain(func() { px, want = win.TestTopNonClient(w.NativeHandle()) })
 	return px, want, true
 }
+
+// Typing into native UI is only automated on macOS.
+func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
+func compose(*mygo.Window, string, int, bool) bool             { return false }

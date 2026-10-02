@@ -1770,6 +1770,32 @@ func TestClick(t *testing.T) {
 	}
 }
 
+// TestContentWindowTyping types into native UI right after a click, before
+// the window draws another frame, and composes text with an input method.
+func TestContentWindowTyping(t *testing.T) {
+	var frames atomic.Int32
+	var name string
+	view := func(c *ui.Context) {
+		frames.Add(1)
+		ui.Column(c).Fill().Padding(20).Children(func() {
+			ui.TextInput(c, &name)
+		})
+	}
+	text := func() (s string) {
+		mygo.RunOnMain(func() { s = name })
+		return s
+	}
+	w := newWindow(t, mygo.WindowOptions{Title: "Typing", Width: 400, Height: 200, Content: ui.View(view)})
+	eventually(t, "a frame", func() bool { return frames.Load() > 0 })
+	if !clickAndType(w, 100, 36, "héllo") {
+		t.Skip("typing automation not available on this platform or input source")
+	}
+	eventually(t, "the typed text", func() bool { return text() == "héllo" })
+	compose(w, "にほん", 3, false)
+	compose(w, "日本", 0, true)
+	eventually(t, "the composed text", func() bool { return text() == "héllo日本" })
+}
+
 // TestContentWindow shows native UI: frames, input from the platform,
 // Update, capture, and page methods that fail.
 func TestContentWindow(t *testing.T) {

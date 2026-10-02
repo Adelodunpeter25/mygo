@@ -129,6 +129,20 @@ func Quit() {
 	}()
 }
 
+// disableFeatures adds features to the --disable-features switch of a
+// command line, keeping those it already names.
+func disableFeatures(commandLine uintptr, features ...string) {
+	cl := at[cefCommandLine](commandLine)
+	name := newStr("disable-features")
+	if old := takeStr(call(cl.getSwitchValue, commandLine, name.p())); old != "" {
+		features = append([]string{old}, features...)
+	}
+	value := newStr(strings.Join(features, ","))
+	call(cl.appendSwitchWithValue, commandLine, name.p(), value.p())
+	runtime.KeepAlive(name)
+	runtime.KeepAlive(value)
+}
+
 // browserClosed counts down the open browsers; the last one ends a Quit.
 func browserClosed() {
 	browsers--
@@ -208,6 +222,10 @@ func initBrowserProcessClasses() {
 				}
 				runtime.KeepAlive(n)
 			}
+			// No spare renderer, which Chromium starts ahead of the next
+			// page: 20 MB more for every app, to show the page of a new
+			// window 20 ms sooner. Electron does without it too.
+			disableFeatures(commandLine, "SpareRendererForSitePerProcess")
 		},
 		"getBrowserProcessHandler": func(self uintptr) uintptr {
 			return browserProcess.ref(0)

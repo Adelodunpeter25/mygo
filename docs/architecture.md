@@ -311,7 +311,11 @@ view, and each page method of the Linux window calls it when it is set.
   mygo_cef_helper`, without the browser side: 2.7 MB. A Go process always
   has threads, which Chromium's zygote and Linux sandbox refuse, so child
   processes start without either (`--no-zygote`, `--no-sandbox`), as
-  WebKitGTK's web processes run unsandboxed in MyGo.
+  WebKitGTK's web processes run unsandboxed in MyGo. Without a zygote,
+  each process relocates the 12 MB of `libcef.so`'s `.data.rel.ro` itself,
+  which the children of a zygote share in Chrome and Electron: a process
+  costs about 20 MB, so Chromium's spare renderer, which it starts ahead of
+  the next page, is disabled.
 - **The message loop.** CEF starts before GTK, as cefclient does, with
   GDK's X11 backend, and `cef_run_message_loop` runs GLib's main loop,
   which dispatches GTK's events too. `Ready` comes once CEF's context is

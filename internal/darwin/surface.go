@@ -207,11 +207,34 @@ var cursorSelectors = map[platform.Cursor]string{
 }
 
 func (s *surface) applyCursor() {
-	name, ok := cursorSelectors[s.cursor]
+	send(nsCursor(s.cursor), "set")
+}
+
+// nsCursor returns the NSCursor of c. The diagonal resize cursors are the
+// frame resize cursors of macOS 15, else AppKit's own older ones.
+func nsCursor(c platform.Cursor) id {
+	cls := class("NSCursor")
+	if c == platform.CursorResizeNWSE || c == platform.CursorResizeNESW {
+		corner, older := uintptr(1|2), "_windowResizeNorthWestSouthEastCursor" // top left
+		if c == platform.CursorResizeNESW {
+			corner, older = 1|8, "_windowResizeNorthEastSouthWestCursor" // top right
+		}
+		if respondsTo(cls, "frameResizeCursorFromPosition:inDirections:") {
+			if cur := send(cls, "frameResizeCursorFromPosition:inDirections:", corner, 1|2); cur != 0 { // inward and outward
+				return cur
+			}
+		}
+		if respondsTo(cls, older) {
+			if cur := send(cls, older); cur != 0 {
+				return cur
+			}
+		}
+	}
+	name, ok := cursorSelectors[c]
 	if !ok {
 		name = "arrowCursor"
 	}
-	send(send(class("NSCursor"), name), "set")
+	return send(cls, name)
 }
 
 func (s *surface) SetCursor(c platform.Cursor) {

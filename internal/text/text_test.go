@@ -1,9 +1,12 @@
 package text
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 func TestLayoutWraps(t *testing.T) {
@@ -81,7 +84,7 @@ func TestGlyphRaster(t *testing.T) {
 	l := s.Layout(Params{Text: "Ag", Style: Style{Size: 32}})
 	n := 0
 	for _, g := range l.Lines[0].Glyphs {
-		img := s.Glyph(g.Face, g.ID, 32, 0)
+		img := s.Glyph(g.Font, g.ID, 1, 0)
 		if !img.OK || img.W == 0 || img.H == 0 || img.Top >= 0 {
 			t.Fatalf("glyph %v: %+v", g.ID, img)
 		}
@@ -214,4 +217,91 @@ func TestMakeRoom(t *testing.T) {
 		t.Error("kept a mask the frame did not draw")
 	}
 	s.EndFrame()
+}
+
+func TestRightToLeft(t *testing.T) {
+	s := Shared()
+	l := s.Layout(Params{Text: "שלום עולם", Style: Style{Size: 16}})
+	if len(l.Lines) != 1 || !l.Lines[0].RTL || len(l.Lines[0].Glyphs) == 0 {
+		t.Fatalf("%+v", l.Lines)
+	}
+	// The caret before the first rune is on the right.
+	first, _, _ := l.Caret(0)
+	last, _, _ := l.Caret(len(l.Runes))
+	if first <= last {
+		t.Errorf("carets at %v and %v", first, last)
+	}
+	// Start aligns right-to-left lines to the right.
+	wide := s.Layout(Params{Text: "שלום", Style: Style{Size: 16}, Width: 300})
+	if line := wide.Lines[0]; line.X+line.Width < 299 {
+		t.Errorf("line at %v, %v wide", line.X, line.Width)
+	}
+}
+
+func TestKeepSpaces(t *testing.T) {
+	s := Shared()
+	p := Params{Text: "aaaa bbbb", Style: Style{Size: 16}}
+	p.Width = s.Layout(p).Width - 1
+	trimmed := s.Layout(p)
+	p.KeepSpaces = true
+	kept := s.Layout(p)
+	if len(trimmed.Lines) != 2 || len(kept.Lines) != 2 {
+		t.Fatalf("%d and %d lines", len(trimmed.Lines), len(kept.Lines))
+	}
+	if trimmed.Lines[0].End != 5 || kept.Lines[0].End != 5 || trimmed.Lines[1].Start != 5 {
+		t.Errorf("lines %d-%d and %d-%d", trimmed.Lines[0].Start, trimmed.Lines[0].End, trimmed.Lines[1].Start, trimmed.Lines[1].End)
+	}
+	if kept.Lines[0].Width <= trimmed.Lines[0].Width {
+		t.Errorf("with the space %v wide, without %v", kept.Lines[0].Width, trimmed.Lines[0].Width)
+	}
+}
+
+func TestNoBreakWords(t *testing.T) {
+	s := Shared()
+	p := Params{Text: "Supercalifragilistic word", Style: Style{Size: 16}, Width: 40}
+	if l := s.Layout(p); len(l.Lines) < 3 {
+		t.Errorf("a long word took %d lines", len(l.Lines))
+	}
+	p.NoBreakWords = true
+	if l := s.Layout(p); len(l.Lines) != 2 || l.Lines[0].Width <= 40 || l.Lines[0].End != 21 {
+		t.Errorf("%d lines, the first %v wide, ending at %d", len(l.Lines), l.Lines[0].Width, l.Lines[0].End)
+	}
+}
+
+func TestEllipsis(t *testing.T) {
+	s := Shared()
+	l := s.Layout(Params{Text: "The quick brown fox jumps", Style: Style{Size: 16}, Width: 100, MaxLines: 1})
+	line := l.Lines[0]
+	if !l.Truncated || len(line.Glyphs) == 0 || line.Width > 100 || line.End >= len(l.Runes) {
+		t.Fatalf("truncated %v, %d glyphs, %v wide, ending at %d", l.Truncated, len(line.Glyphs), line.Width, line.End)
+	}
+	if g := line.Glyphs[len(line.Glyphs)-1]; g.Runes != 0 || g.Cluster != line.End {
+		t.Errorf("the last glyph is %+v", g)
+	}
+}
+
+func TestColorEmoji(t *testing.T) {
+	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
+		t.Skip("emoji fonts vary")
+	}
+	s := Shared()
+	l := s.Layout(Params{Text: "🎉", Style: Style{Size: 32}})
+	g := l.Lines[0].Glyphs[0]
+	if img := s.Glyph(g.Font, g.ID, 1, 0); !img.OK || !img.Colored || img.W < 16 {
+		t.Errorf("%+v", img)
+	}
+}
+
+func TestRegisterFont(t *testing.T) {
+	s := newSystem()
+	if err := s.RegisterFont(goregular.TTF, "MyGo Test Sans"); err != nil {
+		t.Fatal(err)
+	}
+	font := func(family string) *Font {
+		return s.Layout(Params{Text: "Hello", Style: Style{Size: 20, Family: family}}).Lines[0].Glyphs[0].Font
+	}
+	system := font("")
+	if font("MyGo Test Sans") == system || font("Go") == system {
+		t.Error("text does not use the registered font")
+	}
 }

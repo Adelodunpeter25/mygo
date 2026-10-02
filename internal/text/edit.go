@@ -242,3 +242,17 @@ func (b *Boundaries) WordAt(i int) (start, end int) {
 	}
 	return start, end
 }
+
+// lineBreaks reports, for each rune of text and for its end, whether a
+// line may break before it.
+func lineBreaks(text []rune) []bool {
+	breaks := make([]bool, len(text)+1)
+	var seg segmenter.Segmenter
+	seg.Init(text)
+	it := seg.LineIterator()
+	for it.Next() {
+		l := it.Line()
+		breaks[l.Offset+len(l.Text)] = true
+	}
+	return breaks
+}

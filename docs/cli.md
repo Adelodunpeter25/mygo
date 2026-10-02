@@ -71,8 +71,8 @@ Changes to the Go code, the configuration, the icon or the resources rebuild
 the app, regenerate the TypeScript client and restart the app: the running
 build quits, then the new one starts, so the two never hold the same files,
 locks or web view profile at once. A build that fails to compile keeps the
-running one. Frontend changes are the dev server's to handle. Quitting the app, or
-Ctrl+C, ends mygo dev, and `App.Relaunch` restarts the app.
+running one. Frontend changes are the dev server's to handle. Quitting the
+app, or Ctrl+C, ends mygo dev, and `App.Relaunch` restarts the app.
 
 The development app is named `<name> Dev`, with the identifier
 `<identifier>.dev`, so that its data and preferences stay apart from the

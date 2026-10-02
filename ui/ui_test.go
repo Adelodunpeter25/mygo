@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -137,7 +138,11 @@ func TestTyping(t *testing.T) {
 		t.Fatalf("typed %q", d.name)
 	}
 	tt.Key(0, KeyBackspace)
-	tt.Key(Ctrl, KeyLeft)
+	word := Ctrl // the modifier that moves by words
+	if runtime.GOOS == "darwin" {
+		word = Alt
+	}
+	tt.Key(word, KeyLeft)
 	tt.Type("big ")
 	if d.name != "Héllo big wörl" {
 		t.Fatalf("edited to %q", d.name)

@@ -136,6 +136,44 @@ func TestContentTitleBar(t *testing.T) {
 	}
 }
 
+// TestContentFileDrop checks that files dropped on native UI go to the
+// element that takes them, and the others to OnFileDrop, when it has
+// listeners.
+func TestContentFileDrop(t *testing.T) {
+	var zone []string
+	view := func(c *ui.Context) {
+		if files := ui.Box(c).Size(100, 50).DroppedFiles(); files != nil {
+			zone = files
+		}
+	}
+	w, _, s := contentWindow(t, view)
+	send := func(ev platform.SurfaceEvent) (taken bool) {
+		onMain(func() {
+			taken = s.Send(ev)
+			s.Frame()
+		})
+		return taken
+	}
+	if send(platform.SurfaceEvent{Kind: platform.FileDragOver, X: 200, Y: 150}) {
+		t.Error("a window without OnFileDrop listeners took files outside of its drop zone")
+	}
+	if !send(platform.SurfaceEvent{Kind: platform.FileDragOver, X: 20, Y: 20}) {
+		t.Error("the drop zone did not take files")
+	}
+	var events []*FileDropEvent
+	w.OnFileDrop(func(e *FileDropEvent) { events = append(events, e) })
+	if !send(platform.SurfaceEvent{Kind: platform.FileDragOver, X: 200, Y: 150}) {
+		t.Error("a window with OnFileDrop listeners did not take files")
+	}
+	if !send(platform.SurfaceEvent{Kind: platform.FileDrop, X: 200, Y: 150, Files: []string{"/a"}}) || len(events) != 1 ||
+		events[0].Paths[0] != "/a" || events[0].X != 200 || events[0].Y != 150 || zone != nil {
+		t.Errorf("dropped outside of the zone: events %+v, zone %q", events, zone)
+	}
+	if !send(platform.SurfaceEvent{Kind: platform.FileDrop, X: 20, Y: 20, Files: []string{"/b"}}) || len(events) != 1 || len(zone) != 1 || zone[0] != "/b" {
+		t.Errorf("dropped on the zone: events %d, zone %q", len(events), zone)
+	}
+}
+
 func TestContentTextInputTurnsOnIME(t *testing.T) {
 	name := ""
 	view := func(c *ui.Context) {

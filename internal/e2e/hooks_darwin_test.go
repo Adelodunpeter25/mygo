@@ -110,3 +110,39 @@ func controlClick(w *mygo.Window, x, y float64) bool {
 	mygo.RunOnMain(func() { darwin.TestControlClick(w.NativeHandle(), x, y) })
 	return true
 }
+
+func composeOver(w *mygo.Window, text string, caret int, commit bool, from, length int) (ok bool) {
+	mygo.RunOnMain(func() { ok = darwin.TestComposeOver(w.NativeHandle(), text, caret, commit, from, length) })
+	return ok
+}
+
+func inputClient(w *mygo.Window) (selected [2]int, document string, ok bool) {
+	mygo.RunOnMain(func() { selected, document = darwin.TestInputClient(w.NativeHandle()) })
+	return selected, document, true
+}
+
+func dropFiles(w *mygo.Window, x, y float64, paths []string) (over, dropped, ok bool) {
+	mygo.RunOnMain(func() { over, dropped = darwin.TestDropFiles(w.NativeHandle(), x, y, paths) })
+	return over, dropped, true
+}
+
+// accessNode is an element as assistive technology reads it.
+type accessNode struct{ role, label, value string }
+
+func accessibility(w *mygo.Window) (nodes []accessNode, ok bool) {
+	mygo.RunOnMain(func() {
+		for _, n := range darwin.TestAccessibility(w.NativeHandle()) {
+			role := n.Role
+			if n.Subrole != "" {
+				role += "/" + n.Subrole
+			}
+			nodes = append(nodes, accessNode{role, n.Label, n.Value})
+		}
+	})
+	return nodes, true
+}
+
+func accessPerform(w *mygo.Window, label, action, value string) (ok bool) {
+	mygo.RunOnMain(func() { ok = darwin.TestAccessibilityPerform(w.NativeHandle(), label, action, value) })
+	return ok
+}

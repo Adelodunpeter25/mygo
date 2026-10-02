@@ -29,8 +29,9 @@ type Conn struct {
 	Invalidate func()
 
 	// Event receives the surface's events, and Focus and Blur of the
-	// window.
-	Event func(ev platform.SurfaceEvent)
+	// window. It reports whether the content takes dragged files, as
+	// WindowHandler.SurfaceEvent does.
+	Event func(ev platform.SurfaceEvent) bool
 	// ThemeChanged is called when the system appearance changes, and
 	// TitleBarChanged when TitleBar does.
 	ThemeChanged    func()

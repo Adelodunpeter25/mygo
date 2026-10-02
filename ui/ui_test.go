@@ -174,13 +174,13 @@ func TestTextInputFollowsTheFocusAtOnce(t *testing.T) {
 	x, y := float64(r.X+20), float64(r.Y+r.H/2)
 	// Events without frames between them, as between two display refreshes.
 	tt.rt.event(platform.SurfaceEvent{Kind: platform.PointerDown, X: x, Y: y})
-	if !tt.h.ime {
+	if !tt.h.ime.Active {
 		t.Fatal("pressing the text input turned text input on only at the next frame")
 	}
 	tt.rt.event(platform.SurfaceEvent{Kind: platform.PointerUp, X: x, Y: y})
 	tt.rt.event(platform.SurfaceEvent{Kind: platform.TextInput, Text: "Ada"})
 	tt.rt.event(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.KeyTab})
-	if tt.h.ime {
+	if tt.h.ime.Active {
 		t.Error("Tab out of the text input turned text input off only at the next frame")
 	}
 	tt.Frame()

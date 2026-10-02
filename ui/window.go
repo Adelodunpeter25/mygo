@@ -131,8 +131,10 @@ func (h *windowHost) requestFrame() { h.conn.Surface.RequestFrame() }
 
 func (h *windowHost) setCursor(c Cursor) { h.conn.Surface.SetCursor(platform.Cursor(c)) }
 
-func (h *windowHost) setTextInput(active bool, r Rect) {
-	h.conn.Surface.SetTextInput(active, platform.RectF{X: float64(r.X), Y: float64(r.Y), W: float64(r.W), H: float64(r.H)})
+func (h *windowHost) setTextInput(t platform.TextInputState) { h.conn.Surface.SetTextInput(t) }
+
+func (h *windowHost) updateAccessibility(tree *platform.AccessTree) {
+	h.conn.Surface.UpdateAccessibility(tree)
 }
 
 func (h *windowHost) readClipboard() string {

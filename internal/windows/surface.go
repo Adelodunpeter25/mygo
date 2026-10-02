@@ -116,6 +116,7 @@ type surface struct {
 	high     uint16 // a high surrogate of WM_CHAR waiting for its pair
 	ime      bool
 	caret    platform.RectF
+	input    platform.TextInputState
 }
 
 func registerSurfaceClass() {
@@ -213,7 +214,9 @@ func cursorHandle(c platform.Cursor) uintptr {
 	return h
 }
 
-func (s *surface) SetTextInput(active bool, caret platform.RectF) {
+func (s *surface) SetTextInput(t platform.TextInputState) {
+	active, caret := t.Active, t.Caret
+	s.input = t
 	if active != s.ime {
 		s.ime = active
 		if active {
@@ -249,10 +252,11 @@ func (s *surface) placeIME() {
 	procImmSetCandidateWindow.Call(himc, uintptr(unsafe.Pointer(&cand)))
 }
 
-func (s *surface) send(ev platform.SurfaceEvent) {
-	if !s.w.closed {
-		s.w.h.SurfaceEvent(ev)
+func (s *surface) send(ev platform.SurfaceEvent) bool {
+	if s.w.closed {
+		return false
 	}
+	return s.w.h.SurfaceEvent(ev)
 }
 
 func mods() platform.Modifiers {

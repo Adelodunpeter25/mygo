@@ -20,9 +20,28 @@ type Surface interface {
 	// SetCursor sets the pointer's shape over the surface.
 	SetCursor(c Cursor)
 	// SetTextInput turns text input (IME composition) on for an editable
-	// element whose caret is at caret, in DIPs relative to the surface, or
-	// off.
-	SetTextInput(active bool, caret RectF)
+	// element, telling input methods where its caret is and the text
+	// around it, or off.
+	SetTextInput(t TextInputState)
+	// UpdateAccessibility gives assistive technology the content's
+	// elements. The content calls it after every frame once the surface
+	// sent AccessibilityOn.
+	UpdateAccessibility(tree *AccessTree)
+}
+
+// TextInputState is the state of the text input that has the keyboard,
+// for input methods.
+type TextInputState struct {
+	// Active is true while an editable element has the keyboard.
+	Active bool
+	// Caret is the caret's rectangle, in DIPs relative to the surface.
+	Caret RectF
+	// Text is the input's text around the caret, and Start and End are the
+	// selection in it, in runes: both the caret when nothing is selected.
+	// Input methods read it to edit what was typed before, as the accents
+	// of macOS's press and hold replace the letter they decorate.
+	Text       string
+	Start, End int
 }
 
 // SurfaceNative holds the native objects of a Surface.
@@ -73,6 +92,20 @@ const (
 	// SurfaceCommand performs the edit command Text: "copy", "cut",
 	// "paste", "selectAll", "undo", "redo" or "delete" (Edit menu roles).
 	SurfaceCommand
+	// FileDragOver reports files of another app dragged over X, Y, and
+	// FileDragLeave that they left. FileDrop drops Files at X, Y.
+	// WindowHandler.SurfaceEvent returns whether the content takes them
+	// there.
+	FileDragOver
+	FileDragLeave
+	FileDrop
+	// AccessibilityOn reports that assistive technology asked about the
+	// surface: the content calls UpdateAccessibility at once and after
+	// every frame from then on.
+	AccessibilityOn
+	// AccessAction performs Action on the element ID of the accessibility
+	// tree, with Text the value of AccessSetValue.
+	AccessAction
 )
 
 // SurfaceEvent is input on a Surface, or a change of it.
@@ -92,6 +125,16 @@ type SurfaceEvent struct {
 	Repeat  bool
 	Text    string
 	Caret   int
+	// Replace makes TextInput replace, and TextComposition compose over,
+	// the runes From to To of the last TextInputState.Text, instead of the
+	// selection.
+	Replace  bool
+	From, To int
+	// Files are the paths of FileDrop's files.
+	Files []string
+	// ID and Action are AccessAction's.
+	ID     uint64
+	Action AccessActionKind
 }
 
 // Modifiers are the modifier keys held during an event.

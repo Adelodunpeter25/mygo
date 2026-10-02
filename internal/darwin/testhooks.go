@@ -299,19 +299,174 @@ func TestClickAndType(handle uintptr, x, y float64, text string) bool {
 // UI: it shows text as the composition, its caret at rune caret, or with
 // commit, inserts it. It reports false for a window showing a web page.
 func TestCompose(handle uintptr, text string, caret int, commit bool) bool {
+	return TestComposeOver(handle, text, caret, commit, -1, 0)
+}
+
+// TestComposeOver is TestCompose replacing the length UTF-16 units of the
+// input method's document at from, unless from is negative, as macOS's
+// press and hold does with the letter it accents.
+func TestComposeOver(handle uintptr, text string, caret int, commit bool, from, length int) bool {
 	w := theBackend.byNSWindow[id(handle)]
 	if w == nil || w.surface == nil {
 		return false
 	}
 	loadTestInput()
 	withPool(func() {
-		none := nsRange{Location: nsNotFound}
+		replace := nsRange{Location: nsNotFound}
+		if from >= 0 {
+			replace = nsRange{Location: uint(from), Length: uint(length)}
+		}
 		if commit {
-			msgInsertText(w.surface.view, sel("insertText:replacementRange:"), nsString(text), none)
+			msgInsertText(w.surface.view, sel("insertText:replacementRange:"), nsString(text), replace)
 			return
 		}
 		caretAt := nsRange{Location: uint(utf16Len(string([]rune(text)[:caret])))}
-		msgSetMarkedText(w.surface.view, sel("setMarkedText:selectedRange:replacementRange:"), nsString(text), caretAt, none)
+		msgSetMarkedText(w.surface.view, sel("setMarkedText:selectedRange:replacementRange:"), nsString(text), caretAt, replace)
 	})
 	return true
 }
+
+// TestInputClient returns what a window's surface tells input methods: the
+// selected range and the whole text of their document.
+func TestInputClient(handle uintptr) (selected [2]int, document string) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return [2]int{-1, 0}, ""
+	}
+	r := w.surface.selectedRange()
+	withPool(func() {
+		doc, _, _ := w.surface.document()
+		var actual nsRange
+		document = stringOf(w.surface.substring(nsRange{Length: uint(units(doc))}, &actual))
+	})
+	return [2]int{int(r.Location), int(r.Length)}, document
+}
+
+var (
+	testDragOnce sync.Once
+	testDragInfo id
+	testDragAt   NSPoint
+	testDragPB   id
+)
+
+// TestDropFiles drags files over (x, y), in points from the top-left
+// corner of a window's content, and drops them there, as Finder would:
+// it calls the surface's dragging methods with an NSDraggingInfo of its
+// own. It reports whether the surface took the files over that point and
+// whether it took the drop.
+func TestDropFiles(handle uintptr, x, y float64, paths []string) (over, dropped bool) {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return false, false
+	}
+	testDragOnce.Do(func() {
+		classDef("MyGoTestDraggingInfo", "NSObject", nil, []objc.MethodDef{
+			method("draggingLocation", func(self id, _ objc.SEL) NSPoint { return testDragAt }),
+			method("draggingPasteboard", func(self id, _ objc.SEL) id { return testDragPB }),
+			method("draggingSourceOperationMask", func(self id, _ objc.SEL) uint { return 1 }),
+		})
+		testDragInfo = send(send(class("MyGoTestDraggingInfo"), "alloc"), "init")
+		testDragPB = retain(send(class("NSPasteboard"), "pasteboardWithUniqueName"))
+	})
+	withPool(func() {
+		content := msgRect(send(w.win, "contentView"), sel("frame"))
+		testDragAt = NSPoint{x, content.Size.Height - y}
+		send(testDragPB, "clearContents")
+		var urls []id
+		for _, p := range paths {
+			urls = append(urls, send(class("NSURL"), "fileURLWithPath:", uintptr(nsString(p))))
+		}
+		send(testDragPB, "writeObjects:", uintptr(nsArray(urls...)))
+		v := w.surface.view
+		over = send(v, "draggingEntered:", uintptr(testDragInfo)) != 0
+		over = send(v, "draggingUpdated:", uintptr(testDragInfo)) != 0 && over
+		if !over {
+			send(v, "draggingExited:", uintptr(testDragInfo))
+			return
+		}
+		dropped = sendBool(v, "prepareForDragOperation:", uintptr(testDragInfo)) && sendBool(v, "performDragOperation:", uintptr(testDragInfo))
+	})
+	return over, dropped
+}
+
+// TestAccessNode is an element of native UI as assistive technology reads
+// it through NSAccessibility.
+type TestAccessNode struct {
+	Role, Subrole, Label, Value string
+	// Frame is in points of the screen, its origin at the bottom left.
+	Frame    [4]float64
+	Focused  bool
+	Depth    int
+	Children int
+	obj      id
+}
+
+// TestAccessibility reads the elements of a window showing native UI as
+// assistive technology does, depth first.
+func TestAccessibility(handle uintptr) []TestAccessNode {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return nil
+	}
+	var out []TestAccessNode
+	withPool(func() {
+		var walk func(obj id, depth int)
+		walk = func(obj id, depth int) {
+			kids := arrayItems(send(obj, "accessibilityChildren"))
+			if depth > 0 {
+				n := TestAccessNode{
+					Role:     goString(send(obj, "accessibilityRole")),
+					Subrole:  goString(send(obj, "accessibilitySubrole")),
+					Label:    goString(send(obj, "accessibilityLabel")) + goString(send(obj, "accessibilityTitle")),
+					Focused:  sendBool(obj, "isAccessibilityFocused"),
+					Depth:    depth,
+					Children: len(kids),
+					obj:      obj,
+				}
+				if v := send(obj, "accessibilityValue"); v != 0 {
+					n.Value = goString(send(v, "description"))
+				}
+				f := msgRect(obj, sel("accessibilityFrame"))
+				n.Frame = [4]float64{f.Origin.X, f.Origin.Y, f.Size.Width, f.Size.Height}
+				out = append(out, n)
+			}
+			for _, k := range kids {
+				walk(k, depth+1)
+			}
+		}
+		walk(w.surface.view, 0)
+	})
+	return out
+}
+
+// TestAccessibilityPerform performs action ("press", "increment",
+// "decrement", "focus" or "value" with value) on the element of a window
+// showing native UI labeled label, as assistive technology does, and
+// reports whether there was such an element that allowed it.
+func TestAccessibilityPerform(handle uintptr, label, action, value string) bool {
+	for _, n := range TestAccessibility(handle) {
+		if n.Label != label {
+			continue
+		}
+		ok := false
+		withPool(func() {
+			selector := map[string]string{"press": "accessibilityPerformPress", "increment": "accessibilityPerformIncrement",
+				"decrement": "accessibilityPerformDecrement", "focus": "setAccessibilityFocused:", "value": "setAccessibilityValue:"}[action]
+			if !sendBool(n.obj, "isAccessibilitySelectorAllowed:", uintptr(sel(selector))) {
+				return
+			}
+			switch action {
+			case "focus":
+				send(n.obj, selector, 1)
+			case "value":
+				send(n.obj, selector, uintptr(nsString(value)))
+			default:
+				sendBool(n.obj, selector)
+			}
+			ok = true
+		})
+		return ok
+	}
+	return false
+}
+

@@ -143,6 +143,9 @@ func (b *Backend) Windows() []*Window {
 
 func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler) (platform.Window, error) {
 	w := &Window{b: b, H: h, Opts: o, title: o.Title, zoom: o.Zoom, bounds: platform.Rect{X: o.X, Y: o.Y, Width: o.Width, Height: o.Height}, maximized: o.Maximized, full: o.FullScreen}
+	if o.Surface {
+		w.surface = &Surface{w: w, Scale: 1}
+	}
 	if !o.Frameless && (o.TitleBarStyle == "hidden" || o.TitleBarStyle == "hiddenInset") {
 		// Three buttons 46 wide at the top right, as on Windows.
 		w.TitleBarRoom = platform.TitleBar{Height: cmp.Or(o.TitleBarHeight, 32), Right: 138}
@@ -271,7 +274,21 @@ type Window struct {
 	// OnEval, when set, receives the scripts passed to Eval instead of
 	// recording them.
 	OnEval func(js string)
+
+	surface *Surface
 }
+
+// Surface returns the window's surface, nil unless it was created with
+// WindowOptions.Surface.
+func (w *Window) Surface() platform.Surface {
+	if w.surface == nil {
+		return nil
+	}
+	return w.surface
+}
+
+// FakeSurface returns the window's surface, for tests.
+func (w *Window) FakeSurface() *Surface { return w.surface }
 
 // Scripts returns the scripts passed to Eval.
 func (w *Window) Scripts() []string {
@@ -607,3 +624,107 @@ func (*tray) SetMenu(*platform.Menu)      {}
 func (*tray) PopUpMenu(*platform.Menu)    {}
 func (*tray) Bounds() platform.Rect       { return platform.Rect{} }
 func (*tray) Destroy()                    {}
+
+// Surface is a fake window surface: it records what the content asks of
+// it, and tests deliver events through Send.
+type Surface struct {
+	w *Window
+	// Scale is the device pixels per DIP.
+	Scale float64
+
+	mu        sync.Mutex
+	requests  int
+	frames    int
+	pixels    []byte
+	pixW      int
+	pixH      int
+	cursor    platform.Cursor
+	textInput bool
+	caret     platform.RectF
+}
+
+func (s *Surface) Native() platform.SurfaceNative { return platform.SurfaceNative{} }
+
+func (s *Surface) Size() (float64, float64, float64) {
+	s.w.mu.Lock()
+	defer s.w.mu.Unlock()
+	return float64(s.w.bounds.Width), float64(s.w.bounds.Height), s.Scale
+}
+
+func (s *Surface) RequestFrame() {
+	s.mu.Lock()
+	s.requests++
+	s.mu.Unlock()
+}
+
+func (s *Surface) PresentPixels(pix []byte, stride, width, height int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.frames++
+	s.pixW, s.pixH = width, height
+	s.pixels = make([]byte, 4*width*height)
+	for y := 0; y < height; y++ {
+		copy(s.pixels[y*4*width:(y+1)*4*width], pix[y*stride:])
+	}
+}
+
+func (s *Surface) SetCursor(c platform.Cursor) {
+	s.mu.Lock()
+	s.cursor = c
+	s.mu.Unlock()
+}
+
+func (s *Surface) SetTextInput(active bool, caret platform.RectF) {
+	s.mu.Lock()
+	s.textInput, s.caret = active, caret
+	s.mu.Unlock()
+}
+
+// Send delivers an event to the window's content, on the main thread.
+func (s *Surface) Send(ev platform.SurfaceEvent) { s.w.H.SurfaceEvent(ev) }
+
+// Frame draws a frame when the content asked for one since the last, as
+// the display would, and reports whether it did.
+func (s *Surface) Frame() bool {
+	s.mu.Lock()
+	pending := s.requests > 0
+	s.requests = 0
+	s.mu.Unlock()
+	if pending {
+		s.Send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
+	}
+	return pending
+}
+
+// Frames returns how many frames were presented.
+func (s *Surface) Frames() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.frames
+}
+
+// Pixel returns the color of a pixel of the last frame, as BGRA.
+func (s *Surface) Pixel(x, y int) [4]byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if x < 0 || y < 0 || x >= s.pixW || y >= s.pixH {
+		return [4]byte{}
+	}
+	p := s.pixels[(y*s.pixW+x)*4:]
+	return [4]byte{p[0], p[1], p[2], p[3]}
+}
+
+// Cursor returns the pointer shape the content set; TextInput whether it
+// asked for text input.
+func (s *Surface) Cursor() platform.Cursor {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cursor
+}
+
+// TextInput reports whether text input is on, and the caret.
+func (s *Surface) TextInput() (bool, platform.RectF) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.textInput, s.caret
+}

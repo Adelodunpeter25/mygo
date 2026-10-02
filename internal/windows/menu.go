@@ -271,6 +271,13 @@ func (b *Backend) focusedWindow() *window {
 // gesture for them, which DevTools evaluation provides; paste types the
 // clipboard's text, since pages may not read the clipboard.
 func editRole(w *window, role string) bool {
+	if w.surface != nil {
+		if role == "pasteAndMatchStyle" {
+			role = "paste"
+		}
+		w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: role})
+		return true
+	}
 	commands := map[string]string{
 		"undo": "undo", "redo": "redo", "cut": "cut", "copy": "copy",
 		"delete": "delete", "selectAll": "selectAll",

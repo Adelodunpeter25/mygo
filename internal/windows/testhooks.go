@@ -177,3 +177,20 @@ func TestTopNonClient(hwnd uintptr) (px, want int32) {
 	}
 	return origin.Y - r.Top, want
 }
+
+// TestClickSurface clicks (x, y), in DIPs, in a window showing native UI,
+// with the messages a mouse sends. It reports false for a window showing a
+// web page.
+func TestClickSurface(hwnd uintptr, x, y float64) bool {
+	w := theBackend.windows[hwnd]
+	if w == nil || w.surface == nil {
+		return false
+	}
+	scale := float64(w.surface.dpi()) / 96
+	lp := uintptr(uint16(int16(y*scale)))<<16 | uintptr(uint16(int16(x*scale)))
+	const mkLButton = 1
+	procSendMessageW.Call(w.surface.hwnd, wmMouseMove, 0, lp)
+	procSendMessageW.Call(w.surface.hwnd, wmLButtonDown, mkLButton, lp)
+	procSendMessageW.Call(w.surface.hwnd, wmLButtonUp, 0, lp)
+	return true
+}

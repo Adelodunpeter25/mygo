@@ -20,6 +20,7 @@ import (
 
 	"github.com/egoist/mygo/internal/bridge"
 	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/surface"
 )
 
 // TitleBarStyle selects how the title bar of a framed window looks.
@@ -164,13 +165,24 @@ type WindowOptions struct {
 	// display: they override X, Y, Width, Height, UseContentSize,
 	// Maximized and FullScreen.
 	StateKey string
+
+	// Content makes the window show a user interface MyGo draws itself,
+	// on the GPU where it can, instead of a web page: create it with
+	// package ui. The window then has no page: URL and the page's options
+	// are ignored, and the page methods do nothing or fail.
+	Content Content
 }
 
-// Window is a native window hosting a web page. Create windows with
-// NewWindow once the application is ready.
+// Window is a native window hosting a web page, or the Content of package
+// ui. Create windows with NewWindow once the application is ready.
 type Window struct {
 	id     int
 	parent *Window
+	// content is WindowOptions.Content; conn connects it to the native
+	// surface (main thread only).
+	content      Content
+	conn         *surface.Conn
+	invalidating atomic.Bool
 	// secret starts every message of the bridge in this window's pages.
 	// Only the bridge knows it, so messages posted from elsewhere (an
 	// iframe of another origin) are ignored.
@@ -335,11 +347,12 @@ func newWindow(opts WindowOptions, bg *background, native uintptr) *Window {
 	id := windows.nextID
 	windows.Unlock()
 
-	w := &Window{id: id, parent: opts.Parent, trustedOrigins: opts.TrustedOrigins, secret: rand.Text(), stateKey: opts.StateKey, background: bg}
+	w := &Window{id: id, parent: opts.Parent, trustedOrigins: opts.TrustedOrigins, secret: rand.Text(), stateKey: opts.StateKey, background: bg, content: opts.Content}
 	w.hiddenTitleBar = !opts.Frameless && (opts.TitleBarStyle == TitleBarHidden || opts.TitleBarStyle == TitleBarHiddenInset)
 	w.resetPage()
 	popts := w.platformOptions(&opts)
 	popts.BackgroundColor = w.backgroundColor()
+	popts.Surface = opts.Content != nil
 	if opts.Transparent {
 		// Backends keep transparent windows clear; so do theme changes.
 		w.background = nil
@@ -356,13 +369,16 @@ func newWindow(opts WindowOptions, bg *background, native uintptr) *Window {
 	if w.stateKey != "" {
 		w.initState(popts)
 	}
+	if w.content != nil {
+		w.attachContent()
+	}
 
 	windows.Lock()
 	windows.list = append(windows.list, w)
 	windows.Unlock()
 
 	fire1(&App.onWindowCreated, w)
-	if opts.URL != "" {
+	if opts.URL != "" && w.content == nil {
 		w.LoadURL(opts.URL)
 	}
 	if !opts.Hidden {
@@ -908,7 +924,7 @@ func (w *Window) LoadURL(rawURL string) error {
 	if err != nil {
 		return err
 	}
-	w.do(func(n platform.Window) { n.LoadURL(resolved) })
+	w.page(func(n platform.Window) { n.LoadURL(resolved) })
 	return nil
 }
 
@@ -920,7 +936,7 @@ func (w *Window) LoadFile(path string) error {
 	if err != nil {
 		return err
 	}
-	w.do(func(n platform.Window) { n.LoadFile(abs, filepath.Dir(abs)) })
+	w.page(func(n platform.Window) { n.LoadFile(abs, filepath.Dir(abs)) })
 	return nil
 }
 
@@ -981,69 +997,69 @@ func (w *Window) isTrusted(rawURL string) bool {
 // LoadHTML loads an HTML string. Relative URLs in it resolve against
 // baseURL, which may be empty.
 func (w *Window) LoadHTML(html, baseURL string) {
-	w.do(func(n platform.Window) { n.LoadHTML(html, baseURL) })
+	w.page(func(n platform.Window) { n.LoadHTML(html, baseURL) })
 }
 
 // Reload reloads the page.
-func (w *Window) Reload() { w.do(func(n platform.Window) { n.Reload(false) }) }
+func (w *Window) Reload() { w.page(func(n platform.Window) { n.Reload(false) }) }
 
 // ReloadIgnoringCache reloads the page bypassing the cache.
-func (w *Window) ReloadIgnoringCache() { w.do(func(n platform.Window) { n.Reload(true) }) }
+func (w *Window) ReloadIgnoringCache() { w.page(func(n platform.Window) { n.Reload(true) }) }
 
 // Stop stops loading the page.
-func (w *Window) Stop() { w.do(platform.Window.StopLoading) }
+func (w *Window) Stop() { w.page(platform.Window.StopLoading) }
 
 // GoBack navigates back in history.
-func (w *Window) GoBack() { w.do(platform.Window.GoBack) }
+func (w *Window) GoBack() { w.page(platform.Window.GoBack) }
 
 // GoForward navigates forward in history.
-func (w *Window) GoForward() { w.do(platform.Window.GoForward) }
+func (w *Window) GoForward() { w.page(platform.Window.GoForward) }
 
 // CanGoBack reports whether there is a previous page in history.
-func (w *Window) CanGoBack() bool { return get(w, platform.Window.CanGoBack) }
+func (w *Window) CanGoBack() bool { return pageGet(w, platform.Window.CanGoBack) }
 
 // CanGoForward reports whether there is a next page in history.
-func (w *Window) CanGoForward() bool { return get(w, platform.Window.CanGoForward) }
+func (w *Window) CanGoForward() bool { return pageGet(w, platform.Window.CanGoForward) }
 
 // URL returns the URL of the current page.
-func (w *Window) URL() string { return get(w, platform.Window.URL) }
+func (w *Window) URL() string { return pageGet(w, platform.Window.URL) }
 
 // IsLoading reports whether the page is still loading.
-func (w *Window) IsLoading() bool { return get(w, platform.Window.IsLoading) }
+func (w *Window) IsLoading() bool { return pageGet(w, platform.Window.IsLoading) }
 
 // SetZoomFactor zooms the page; 1 is 100%.
 func (w *Window) SetZoomFactor(f float64) {
 	if f <= 0 {
 		return
 	}
-	w.do(func(n platform.Window) {
+	w.page(func(n platform.Window) {
 		n.SetZoom(f)
 		w.sendTitleBar() // the controls take other CSS pixels
 	})
 }
 
 // ZoomFactor returns the page zoom; 1 is 100%.
-func (w *Window) ZoomFactor() float64 { return get(w, platform.Window.Zoom) }
+func (w *Window) ZoomFactor() float64 { return pageGet(w, platform.Window.Zoom) }
 
 // SetUserAgent overrides the user agent for subsequent requests.
-func (w *Window) SetUserAgent(ua string) { w.do(func(n platform.Window) { n.SetUserAgent(ua) }) }
+func (w *Window) SetUserAgent(ua string) { w.page(func(n platform.Window) { n.SetUserAgent(ua) }) }
 
 // UserAgent returns the user agent of the page.
-func (w *Window) UserAgent() string { return get(w, platform.Window.UserAgent) }
+func (w *Window) UserAgent() string { return pageGet(w, platform.Window.UserAgent) }
 
 // OpenDevTools opens the web inspector (unless disabled with
 // WindowOptions.DevTools).
-func (w *Window) OpenDevTools() { w.do(platform.Window.OpenDevTools) }
+func (w *Window) OpenDevTools() { w.page(platform.Window.OpenDevTools) }
 
 // CloseDevTools closes the web inspector.
-func (w *Window) CloseDevTools() { w.do(platform.Window.CloseDevTools) }
+func (w *Window) CloseDevTools() { w.page(platform.Window.CloseDevTools) }
 
 // IsDevToolsOpened reports whether the web inspector is open.
-func (w *Window) IsDevToolsOpened() bool { return get(w, platform.Window.IsDevToolsOpened) }
+func (w *Window) IsDevToolsOpened() bool { return pageGet(w, platform.Window.IsDevToolsOpened) }
 
 // ToggleDevTools opens or closes the web inspector.
 func (w *Window) ToggleDevTools() {
-	w.do(func(n platform.Window) {
+	w.page(func(n platform.Window) {
 		if n.IsDevToolsOpened() {
 			n.CloseDevTools()
 		} else {
@@ -1053,10 +1069,14 @@ func (w *Window) ToggleDevTools() {
 }
 
 // Print opens the print dialog for the page.
-func (w *Window) Print() { w.do(platform.Window.Print) }
+func (w *Window) Print() { w.page(platform.Window.Print) }
 
-// CapturePage returns a PNG screenshot of the visible page.
+// CapturePage returns a PNG screenshot of the visible page. For a window
+// showing Content it renders the content as it is.
 func (w *Window) CapturePage() ([]byte, error) {
+	if w.content != nil {
+		return w.captureContent()
+	}
 	type result struct {
 		png []byte
 		err error
@@ -1073,6 +1093,9 @@ func (w *Window) CapturePage() ([]byte, error) {
 }
 
 var errDestroyed = errors.New("mygo: window has been destroyed")
+
+// errNoPage is returned by the page methods of windows showing Content.
+var errNoPage = errors.New("mygo: the window shows Content, not a web page")
 
 // Eval evaluates JavaScript in the page and returns its result, decoded
 // from JSON. An expression's value is returned, with promises awaited:
@@ -1134,6 +1157,9 @@ const (
 // eval returns the JSON result of code, which shares the memory of the
 // page's answer.
 func (w *Window) eval(ctx context.Context, code string) (jsontext.Value, error) {
+	if w.content != nil {
+		return nil, errNoPage
+	}
 	type result struct {
 		raw string
 		err error
@@ -1238,6 +1264,9 @@ const maxHeldEvents = 1024
 // the DOM of the page is ready; replies to calls are sent right away since
 // the page is waiting for them.
 func (w *Window) enqueue(msg message, event bool) {
+	if w.content != nil {
+		return
+	}
 	w.outMu.Lock()
 	if event && !w.domReady {
 		if len(w.held) == maxHeldEvents {
@@ -1412,6 +1441,7 @@ func (h *windowHandler) Closed() {
 	if w.native == nil {
 		return
 	}
+	w.detachContent()
 	w.native = nil
 	w.destroyed.Store(true)
 

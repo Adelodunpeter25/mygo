@@ -1,0 +1,155 @@
+package mygo
+
+import (
+	"bytes"
+	"errors"
+	"image"
+	"image/png"
+
+	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/internal/surface"
+)
+
+// Content is what a window shows in place of a web page: a user interface
+// MyGo draws itself, on the GPU where it can. Package ui provides it:
+//
+//	mygo.NewWindow(mygo.WindowOptions{Title: "Counter", Content: ui.View(counter.View)})
+type Content interface {
+	// AttachContent connects the content to its window. NewWindow calls it
+	// on the main thread; only MyGo's own packages implement it.
+	AttachContent(conn *surface.Conn)
+}
+
+// attachContent connects the window's Content to its surface. Main thread
+// only.
+func (w *Window) attachContent() {
+	s := w.native.Surface()
+	if s == nil {
+		panic("mygo: the backend " + backend().Name() + " created no surface for the window's Content")
+	}
+	w.conn = &surface.Conn{
+		Surface:   s,
+		Window:    w,
+		Clipboard: backend().Clipboard(),
+		StartDrag: func() {
+			if w.native != nil {
+				w.native.StartDrag()
+			}
+		},
+		TitleBarDoubleClicked: func() {
+			if w.native != nil {
+				w.native.TitleBarDoubleClicked()
+			}
+		},
+		IsDark:     func() bool { return backend().Theme().IsDark() },
+		OpenURL:    func(url string) { go Shell.OpenExternal(url) },
+		Invalidate: w.Invalidate,
+	}
+	w.content.AttachContent(w.conn)
+}
+
+// page runs fn with the native window, unless the window shows Content
+// and so has no page.
+func (w *Window) page(fn func(n platform.Window)) {
+	if w.content != nil {
+		return
+	}
+	w.do(fn)
+}
+
+// pageGet is page for functions returning a value.
+func pageGet[T any](w *Window, fn func(n platform.Window) T) T {
+	if w.content != nil {
+		var zero T
+		return zero
+	}
+	return get(w, fn)
+}
+
+// Invalidate redraws the window's Content, as after a change of the state
+// its user interface shows. It is safe from any goroutine; calls made
+// before the next frame make one frame. It does nothing for a web page.
+func (w *Window) Invalidate() {
+	if w.content == nil || !w.invalidating.CompareAndSwap(false, true) {
+		return
+	}
+	postMain(func() {
+		w.invalidating.Store(false)
+		if w.conn != nil && w.native != nil {
+			w.conn.Surface.RequestFrame()
+		}
+	})
+}
+
+// Update runs fn on the main thread, where the window's Content builds its
+// user interface, then redraws the Content. Goroutines change the state
+// the interface shows through it:
+//
+//	go func() {
+//		items := load()
+//		win.Update(func() { app.items = items })
+//	}()
+//
+// It returns without waiting for fn.
+func (w *Window) Update(fn func()) {
+	postMain(func() {
+		fn()
+		if w.conn != nil && w.native != nil {
+			w.conn.Surface.RequestFrame()
+		}
+	})
+}
+
+// captureContent renders the Content into a PNG image.
+func (w *Window) captureContent() ([]byte, error) {
+	var (
+		width, height int
+		pix           []byte
+	)
+	ok := false
+	onMain(func() {
+		if w.conn != nil && w.conn.Capture != nil {
+			width, height, pix = w.conn.Capture()
+			ok = true
+		}
+	})
+	if !ok {
+		return nil, errDestroyed
+	}
+	if width == 0 || height == 0 {
+		return nil, errors.New("mygo: the window's content has no size")
+	}
+	img := &image.RGBA{Pix: pix, Stride: 4 * width, Rect: image.Rect(0, 0, width, height)}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// SurfaceEvent passes the surface's events to the Content.
+func (h *windowHandler) SurfaceEvent(ev platform.SurfaceEvent) {
+	if c := h.w.conn; c != nil && c.Event != nil {
+		c.Event(ev)
+	}
+}
+
+// detachContent tells the Content its window closed. Main thread only.
+func (w *Window) detachContent() {
+	if c := w.conn; c != nil {
+		w.conn = nil
+		if c.Detach != nil {
+			c.Detach()
+		}
+	}
+}
+
+// contentThemeChanged tells the Contents of the windows that the system
+// appearance changed. Main thread only.
+func contentThemeChanged() {
+	for _, w := range Windows() {
+		if c := w.conn; c != nil && c.ThemeChanged != nil {
+			c.ThemeChanged()
+		}
+	}
+}

@@ -30,6 +30,7 @@ on the screen. Sizes and positions are in device-independent pixels.
 |---|---|
 | `Title` | the window title; defaults to the app name, then follows the page's `<title>` |
 | `URL` | loaded once the window exists; `/` and other URLs without a scheme are pages of the [frontend](frontend.md#how-pages-load) |
+| `Content` | shows a [native UI](ui.md) that MyGo draws, instead of a page |
 | `Width`, `Height` | the size of the window, or of its page with `UseContentSize` |
 | `X`, `Y` | the top-left corner; the window is centered when both are 0 |
 | `MinWidth`, `MinHeight`, `MaxWidth`, `MaxHeight` | limits of resizing; 0 means none |

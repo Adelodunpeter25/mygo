@@ -36,6 +36,7 @@ before changing anything under `internal/`.
 .                       package mygo: the public API
 ├── app.go              lifecycle, quit sequence, Dock, paths (paths.go)
 ├── window.go           Window: native window + its page, events, Eval
+├── content.go          Content: windows showing native UI instead of a page
 ├── ipc.go              Bind/BindAs, method calls, Event[T], CallerWindow
 ├── plugin.go           Plugin and Use: services bound as "plugin:<name>"
 ├── channel.go          Channel[T]: values streamed to a call's page
@@ -57,6 +58,14 @@ before changing anything under `internal/`.
 │   ├── unsupported/    stub for other platforms
 │   ├── fake/           in-memory backend for unit tests
 │   ├── bridge/         embeds bridge.js, built from packages/bridge
+│   ├── surface/        the connection between a window and its native UI
+│   ├── scene/          display lists and glyph atlases, what renderers draw
+│   ├── text/           fonts, shaping, line breaking, editing, glyph rasterization
+│   ├── vec/            the coverage rasterizer of glyphs and paths
+│   ├── raster/         the CPU renderer of scenes
+│   ├── gpu/            the instances GPU renderers draw, and gputest/ for their tests
+│   ├── gpu/d3d11/      the Direct3D 11 renderer of scenes
+│   ├── gpu/metal/      the Metal renderer of scenes
 │   ├── tsgen/          TypeScript client generator
 │   ├── accelerator/    parses "CmdOrCtrl+Shift+K"
 │   ├── update/         update manifests, signatures, archives and delta updates
@@ -69,8 +78,9 @@ before changing anything under `internal/`.
 ├── plugins/            official plugins, each a Go package and its npm
 │                       package (@mygo-plugins/<name>) side by side: fetch,
 │                       websocket; and updater, the update window, Go only
+├── ui/                 native UI: views, layout, widgets, text editing, Tester
 ├── cmd/mygo/           the CLI: init, generate, dev, build, doctor
-├── examples/           hello, todo, frameless, native, vibrancy
+├── examples/           hello, todo, frameless, native, vibrancy, gallery (native UI)
 ├── docs/               the user guides, the official plugins' pages
 │                       (plugins/), and this architecture guide
 └── website/            the website, with these docs: TanStack Start, prerendered
@@ -207,10 +217,13 @@ purego gives three primitives, used everywhere:
 
 ### Linux (`internal/linux`)
 
-- `ffi.go` `dlopen`s GLib, GObject, GIO, GDK, GTK 3, WebKitGTK 4.1 (4.0),
-  JavaScriptCore, libsoup 3 (2.4), cairo, GdkPixbuf and, when installed,
-  AppIndicator. Symbols from newer WebKitGTK versions are bound optionally
-  and feature-detected (`webkitWebViewCallAsyncJavascriptFunction != nil`).
+- `ffi.go` `dlopen`s GLib, GObject, GIO, GDK, GTK 3, cairo, GdkPixbuf
+  and, when installed, AppIndicator, then WebKitGTK 4.1 (4.0),
+  JavaScriptCore and libsoup 3 (2.4), which only windows showing web pages
+  need: without them, `errWebKit` says what to install when such a window
+  is created, and windows showing native UI work. Symbols from newer
+  WebKitGTK versions are bound optionally and feature-detected
+  (`webkitWebViewCallAsyncJavascriptFunction != nil`).
 - Signals are connected with `g_signal_connect_data`, passing the window id as
   user data; `Backend.window(data)` resolves it and ignores closed windows.
   GDK event structs are read at fixed 64-bit offsets (`field[T]`).
@@ -827,12 +840,117 @@ backend, which:
   bar, tray, popup) so `UpdateMenuItem` can change label/state in place and
   rebuilt menus release their items,
 - performs edit roles natively (first responder on macOS,
-  `webkit_web_view_execute_editing_command` on Linux) and reports everything
+  `webkit_web_view_execute_editing_command` on Linux), or sends them to a
+  window showing native UI as a `SurfaceCommand`, and reports everything
   else through `AppHandler.MenuItemClicked`; the core toggles checkbox/radio
   state, performs window and view roles and calls `Click`.
 
 macOS gets a default menu bar (App, File, Edit, View, Window), which is what
 makes Cmd+C/V/Q work; other platforms get none unless the app sets one.
+
+## Native UI (`ui`)
+
+A window with `WindowOptions.Content` shows a user interface MyGo draws
+itself instead of a web page. The layers stay as everywhere else: the
+toolkit (`ui`) is plain Go above the platform contract, a backend only
+provides a surface to draw on and its input, and renderers know nothing of
+either.
+
+```
+ view (Go) ──► ui: build, layout, paint ──► internal/scene ──► internal/gpu/d3d11 | internal/raster
+                 ▲       └─ internal/text: shaping, glyph and mask atlases
+                 │
+ internal/surface.Conn ◄── content.go (package mygo) ◄── platform.Surface: darwin | linux | windows | fake
+```
+
+- **The surface.** With `platform.WindowOptions.Surface`, a backend creates
+  a view MyGo draws in place of the webview: a layer-backed NSView on
+  macOS, a GtkDrawingArea on Linux, a child window of class `MyGoSurface`
+  on Windows. `platform.Surface` gives its native handle (for a swap
+  chain), size and scale; asks for a frame (`RequestFrame`: a paused
+  `CADisplayLink`, `gtk_widget_queue_draw`, `InvalidateRect`); presents
+  pixels drawn on the CPU (`PresentPixels`: a CGImage as the layer's
+  contents, cairo in the `draw` signal, `SetDIBitsToDevice` in `WM_PAINT`);
+  sets the cursor; and turns the input method on and off at the caret
+  (NSTextInputClient, GtkIMContext, IMM32). Everything else comes through
+  `WindowHandler.SurfaceEvent`, in DIPs: frames, resizes, the pointer, the
+  wheel, keys, text, compositions, focus, and the edit roles of menus
+  (`SurfaceCommand`).
+- **The connection.** `content.go` attaches the content to its window
+  through `internal/surface.Conn`, which carries the surface and, as
+  functions, what the content needs of the app (the clipboard, dragging
+  the window, the appearance, opening URLs), so `ui` imports neither
+  `mygo` nor a backend, and an app without native UI links none of it.
+  `Window.Update` and `Invalidate` coalesce redraws asked from any goroutine
+  into one frame on the main thread. Page methods return `errNoPage` or do
+  nothing.
+- **Frames.** The engine (`ui/runtime.go`) calls the view to build a
+  frame, again (up to three times) when a handler changed the state while
+  it built, so the frame shows the outcome; lays it out with flexbox
+  (`layout.go`); commits the boxes to the elements' states with the hit
+  list in paint order, the focus order and the labels; paints a
+  `scene.Scene`; and presents it. Input between frames goes to the states
+  of the last frame's elements. An element's identity hashes its parent's
+  with its position or `Key`, so focus, scroll offsets, editors and
+  animations survive rebuilding. Frames happen only when asked: input,
+  `Invalidate`, `After`, or `AnimationFrame` while something moves.
+- **Scenes** are flat lists of operations in device pixels: rounded
+  rectangles with borders and linear gradients, shadows (blurred rounded
+  rectangles), runs of glyphs, images, and pushed and popped clips.
+  Renderers draw the whole scene each frame and retain only textures.
+- **Text.** `internal/text` shapes with go-text/typesetting (HarfBuzz's
+  algorithms in Go), splits runs by script, direction and font, falls back
+  through the system's fonts, wraps lines and caches layouts by their
+  parameters. `internal/vec` rasterizes glyph outlines into a coverage atlas
+  at four subpixel offsets; PNG glyphs (color emoji) go into a color atlas,
+  and paths drawn with `Painter` are masks in the coverage atlas. An atlas
+  logs the rectangles that change, so renderers upload only those.
+- **Atlas lifetime.** A mask drawn for the first time goes to the
+  transient zone at the bottom of the atlas, which the next frame frees,
+  and moves to the lasting zone at the top once another frame draws it, so
+  animated shapes never fill the atlas. When an atlas fills up during a
+  frame anyway, the engine calls `MakeRoom`, which repacks what the frame
+  drew, grows the atlas when that is much of it and forgets the rest, and
+  paints the frame again: no frame shows with glyphs missing.
+- **Renderers.** `internal/gpu` turns a scene into one instanced quad per
+  operation, in batches that share a scissor rectangle and an image, for
+  one shader that computes the signed distance to rounded rectangles, Evan
+  Wallace's blurred rounded box, gradients, atlas coverage and the
+  innermost rounded clip; outer clips are scissor rectangles. Every GPU
+  renderer draws these instances:
+  - `internal/gpu/d3d11` with a shader compiled to DXBC ahead of time
+    (`go generate ./internal/gpu/d3d11` on Windows, with the system's
+    `d3dcompiler_47.dll`), so apps carry no shader compiler, into a
+    flip-model swap chain on the surface's window, with WARP when no
+    hardware device works;
+  - `internal/gpu/metal` with a shader in Metal Shading Language that
+    Metal compiles when the renderer starts, into a CAMetalLayer it adds to
+    the surface view's layer. Its frames present with the Core Animation
+    transaction (`presentsWithTransaction`), so a live resize shows no
+    stretched frames, and each frame waits for the GPU to finish the last
+    before it updates the textures and the instance buffer the last read.
+
+  `internal/raster` draws the same scene with the same formulas on the CPU,
+  solid spans inside shapes and only the edges of shadows computed, and
+  redraws only what differs from the last scene (`raster.Renderer`): it is
+  the renderer of Linux for now, of tests and of `MYGO_GPU=0`, and the one
+  a window falls back to when its GPU renderer fails.
+- **Tests.** `ui.Tester` runs views against a host in memory
+  (`ui/headless.go`) with the CPU renderer; the fake backend's surface lets
+  the core's tests drive content windows through `package mygo`.
+  `BenchmarkFrame` in `ui` measures a frame of a large window on the CPU.
+  The GPU renderers' tests draw `gputest.Scene` and compare it with the
+  CPU renderer's drawing: on Windows in a hidden window, on macOS into an
+  offscreen texture.
+
+A new widget composes elements (`ui/widgets.go`), keeps what it needs from
+frame to frame with `Local` or in `state`, declares its interaction with
+element flags (`flagClickable`, `flagFocusable`, …), paints in `Draw`, and
+gets a test with `Tester`. A new GPU renderer draws the instances of
+`gpu.Builder` with a port of the shader, syncs atlases with
+`Atlas.Changes`, is created in `ui/gpu_<os>.go` behind `gpuRenderer`, and
+has a test that compares its drawing of `gputest.Scene` with the CPU
+renderer's (`gputest.Compare`).
 
 ## CLI (`cmd/mygo`)
 
@@ -1024,6 +1142,7 @@ profile).
 | CLI | `go test ./cmd/mygo` | config, Info.plist, icons, universal binaries, template, dev launch/ready/stop (the test binary plays the app), watcher and `go list` inputs, resources (platform directories, universal pairs, staging, conflicts, dev placement; builds for every OS), frontend embedding (compiles an app with the overlay), `.DS_Store` against a dmgbuild golden file, a real DMG (`hdiutil`); builds and tools are skipped with `-short` |
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
 | plugins | `go test ./plugins/...` | the fetch plugin against `httptest` servers, the WebSocket client against a test server (ordering, fragments, pings, closing handshakes) |
+| native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; `go test -run '^$' -bench . ./ui` times a frame |
 | GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open; on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
 
 The XDG variables let the URL scheme test check that GLib opens the scheme
@@ -1162,3 +1281,5 @@ which npm allows only for packages that exist: the first release uses an
 | content protection, click-through | yes | ignored | yes |
 | custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost` | `http://<scheme>.localhost` (the page's `location`) |
 | window.open | keeps the opener | independent window | independent window |
+| native UI surface | layer-backed NSView, frames from `CADisplayLink`, input methods through NSTextInputClient | GtkDrawingArea, GtkIMMulticontext | `MyGoSurface` child window, IMM32 |
+| native UI rendering | Metal, into a CAMetalLayer presenting with the Core Animation transaction | CPU, painted with cairo | Direct3D 11 (WARP without a GPU), flip-model swap chain |

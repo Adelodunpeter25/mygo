@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/ui"
 )
 
 type Greeter struct{}
@@ -1767,4 +1768,60 @@ func TestClick(t *testing.T) {
 	if !f.IsVisible() {
 		t.Error("frameless window disappeared after a drag click")
 	}
+}
+
+// TestContentWindow shows native UI: frames, input from the platform,
+// Update, capture, and page methods that fail.
+func TestContentWindow(t *testing.T) {
+	var frames, clicks atomic.Int32
+	var label atomic.Value
+	label.Store("before")
+	view := func(c *ui.Context) {
+		frames.Add(1)
+		ui.Box(c).Fill().Background(ui.RGB(30, 144, 255)).Children(func() {
+			b := ui.Box(c).Size(200, 100).Background(ui.RGB(255, 0, 0))
+			if b.Clicked() {
+				clicks.Add(1)
+			}
+			ui.Text(c, label.Load().(string))
+		})
+	}
+	w := newWindow(t, mygo.WindowOptions{Title: "Content", Width: 400, Height: 300, Content: ui.View(view)})
+	eventually(t, "a frame", func() bool { return frames.Load() > 0 })
+
+	if _, err := w.Eval("1"); err == nil {
+		t.Error("Eval worked in a window without a page")
+	}
+	data, err := w.CapturePage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := img.Bounds()
+	at := func(x, y float64) color.RGBA {
+		// The capture has the window's device pixels.
+		s := float64(b.Dx()) / 400
+		return color.RGBAModel.Convert(img.At(b.Min.X+int(x*s), b.Min.Y+int(y*s))).(color.RGBA)
+	}
+	if c := at(100, 50); c.R < 200 || c.B > 60 {
+		t.Errorf("the red box is %v", c)
+	}
+	if c := at(300, 250); c.B < 200 || c.R > 60 {
+		t.Errorf("the background is %v", c)
+	}
+
+	before := frames.Load()
+	w.Update(func() { label.Store("after") })
+	eventually(t, "a frame after Update", func() bool { return frames.Load() > before })
+
+	if !click(w, 100, 50) {
+		t.Skip("click automation not available on this platform")
+	}
+	eventually(t, "the click", func() bool { return clicks.Load() == 1 })
+	click(w, 300, 250) // outside the box
+	click(w, 150, 80)
+	eventually(t, "the second click", func() bool { return clicks.Load() == 2 })
 }

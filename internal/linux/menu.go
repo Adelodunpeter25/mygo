@@ -54,7 +54,13 @@ func initMenuCallbacks() {
 		id := int(data)
 		if cmd, ok := editCommands[itemRoles[id]]; ok {
 			for _, w := range b.windows {
-				if gtkWindowIsActive(w.win) {
+				if gtkWindowIsActive(w.win) && w.surface != nil {
+					role := itemRoles[id]
+					if role == "pasteAndMatchStyle" {
+						role = "paste"
+					}
+					w.h.SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: role})
+				} else if gtkWindowIsActive(w.win) {
 					webkitWebViewExecuteEditingCommand(w.web, cs(cmd))
 				}
 			}

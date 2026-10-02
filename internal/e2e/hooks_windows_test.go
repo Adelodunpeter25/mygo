@@ -14,12 +14,17 @@ func activateMenu(w *mygo.Window, path ...string) (err error) {
 	return err
 }
 
-// Keyboard, dialog, click and popup automation are not wired on Windows.
+// Keyboard, dialog and popup automation are not wired on Windows.
 func pressShortcut(string, bool) (bool, bool) { return false, false }
 
 func endSheet(*mygo.Window) (bool, bool) { return false, false }
 
-func click(*mygo.Window, float64, float64) bool { return false }
+// Clicks reach windows showing native UI only: WebView2 takes the mouse in
+// windows of its own process.
+func click(w *mygo.Window, x, y float64) (ok bool) {
+	mygo.RunOnMain(func() { ok = win.TestClickSurface(w.NativeHandle(), x, y) })
+	return ok
+}
 
 func webViewAttached(*mygo.Window) (bool, bool) { return false, false }
 

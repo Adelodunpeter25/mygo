@@ -279,3 +279,24 @@ func TestPressTitleButton(handle uintptr, name string) bool {
 	}
 	return false
 }
+
+// TestClickSurface clicks (x, y), in DIPs, in a window showing native UI,
+// through the XTEST extension like a mouse would. It reports false for a
+// window showing a web page, and without an X server.
+func TestClickSurface(handle uintptr, x, y float64) bool {
+	w := windowByHandle(handle)
+	if w == nil || w.surface == nil {
+		return false
+	}
+	var origin func(window ptr, x, y *int32) int32
+	if !bind(libGDK, &origin, "gdk_window_get_origin") {
+		return false
+	}
+	var ox, oy int32
+	origin(gtkWidgetGetWindow(w.surface.area), &ox, &oy)
+	scale := float64(gtkWidgetGetScaleFactor(w.surface.area))
+	if !TestMovePointer(int((float64(ox)+x)*scale), int((float64(oy)+y)*scale)) {
+		return false
+	}
+	return TestPressButton(true) && TestPressButton(false)
+}

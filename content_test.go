@@ -1,0 +1,119 @@
+package mygo
+
+import (
+	"bytes"
+	"errors"
+	"image/png"
+	"testing"
+
+	"github.com/egoist/mygo/internal/fake"
+	"github.com/egoist/mygo/internal/platform"
+	"github.com/egoist/mygo/ui"
+)
+
+// contentWindow creates a window showing view and draws its first frame.
+func contentWindow(t *testing.T, view func(c *ui.Context)) (*Window, *fake.Window, *fake.Surface) {
+	t.Helper()
+	w := NewWindow(WindowOptions{Width: 300, Height: 200, Content: ui.View(view)})
+	t.Cleanup(w.Destroy)
+	wins := fb.Windows()
+	fw := wins[len(wins)-1]
+	s := fw.FakeSurface()
+	if s == nil {
+		t.Fatal("the window has no surface")
+	}
+	onMain(func() { s.Frame() })
+	return w, fw, s
+}
+
+func TestContentDrawsAndHandlesInput(t *testing.T) {
+	clicks := 0
+	view := func(c *ui.Context) {
+		c.Root().Background(ui.RGB(255, 0, 0))
+		if ui.Button(c, "Press").Absolute().Left(10).Top(10).Size(100, 40).Clicked() {
+			clicks++
+		}
+	}
+	w, _, s := contentWindow(t, view)
+	if s.Frames() != 1 {
+		t.Fatalf("%d frames presented", s.Frames())
+	}
+	if p := s.Pixel(250, 150); p != [4]byte{0, 0, 255, 255} {
+		t.Errorf("background pixel %v", p)
+	}
+	onMain(func() {
+		s.Send(platform.SurfaceEvent{Kind: platform.PointerDown, X: 50, Y: 30})
+		s.Send(platform.SurfaceEvent{Kind: platform.PointerUp, X: 50, Y: 30})
+		s.Frame()
+	})
+	if clicks != 1 {
+		t.Errorf("%d clicks", clicks)
+	}
+
+	// The window has no page.
+	if _, err := w.Eval("1"); !errors.Is(err, errNoPage) {
+		t.Errorf("Eval: %v", err)
+	}
+	if err := w.LoadURL("https://example.com"); err != nil || w.URL() != "" {
+		t.Errorf("LoadURL: %v, URL %q", err, w.URL())
+	}
+
+	data, err := w.CapturePage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	img, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b := img.Bounds(); b.Dx() != 300 || b.Dy() != 200 {
+		t.Errorf("capture is %v", b)
+	}
+	if r, g, b, _ := img.At(250, 150).RGBA(); r>>8 != 255 || g != 0 || b != 0 {
+		t.Errorf("captured pixel %d %d %d", r>>8, g>>8, b>>8)
+	}
+}
+
+func TestContentInvalidateAndUpdate(t *testing.T) {
+	n := 0
+	view := func(c *ui.Context) { ui.Textf(c, "n = %d", n) }
+	w, _, s := contentWindow(t, view)
+	before := s.Frames()
+	w.Update(func() { n = 5 })
+	onMain(func() {})
+	onMain(func() { s.Frame() })
+	if s.Frames() != before+1 {
+		t.Errorf("Update drew %d frames", s.Frames()-before)
+	}
+	w.Invalidate()
+	w.Invalidate()
+	onMain(func() {})
+	onMain(func() { s.Frame() })
+	if s.Frames() != before+2 {
+		t.Errorf("two Invalidate calls drew %d frames", s.Frames()-before-1)
+	}
+}
+
+func TestContentTextInputTurnsOnIME(t *testing.T) {
+	name := ""
+	view := func(c *ui.Context) {
+		ui.TextInput(c, &name).Absolute().Left(10).Top(10).Width(200)
+	}
+	_, _, s := contentWindow(t, view)
+	onMain(func() {
+		s.Send(platform.SurfaceEvent{Kind: platform.PointerDown, X: 30, Y: 25})
+		s.Send(platform.SurfaceEvent{Kind: platform.PointerUp, X: 30, Y: 25})
+		s.Frame()
+		s.Send(platform.SurfaceEvent{Kind: platform.TextInput, Text: "héllo"})
+		s.Frame()
+	})
+	if name != "héllo" {
+		t.Errorf("typed %q", name)
+	}
+	if on, caret := s.TextInput(); !on || caret.X < 10 || caret.H <= 0 {
+		t.Errorf("text input %v at %+v", on, caret)
+	}
+	if c := s.Cursor(); c != platform.CursorText {
+		t.Errorf("cursor %v over the input", c)
+	}
+}

@@ -105,3 +105,8 @@ func compose(w *mygo.Window, text string, caret int, commit bool) (ok bool) {
 	mygo.RunOnMain(func() { ok = darwin.TestCompose(w.NativeHandle(), text, caret, commit) })
 	return ok
 }
+
+func controlClick(w *mygo.Window, x, y float64) bool {
+	mygo.RunOnMain(func() { darwin.TestControlClick(w.NativeHandle(), x, y) })
+	return true
+}

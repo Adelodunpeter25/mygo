@@ -1799,7 +1799,7 @@ func TestContentWindowTyping(t *testing.T) {
 // TestContentWindow shows native UI: frames, input from the platform,
 // Update, capture, and page methods that fail.
 func TestContentWindow(t *testing.T) {
-	var frames, clicks atomic.Int32
+	var frames, clicks, rightClicks atomic.Int32
 	var label atomic.Value
 	label.Store("before")
 	view := func(c *ui.Context) {
@@ -1808,6 +1808,9 @@ func TestContentWindow(t *testing.T) {
 			b := ui.Box(c).Size(200, 100).Background(ui.RGB(255, 0, 0))
 			if b.Clicked() {
 				clicks.Add(1)
+			}
+			if b.RightClicked() {
+				rightClicks.Add(1)
 			}
 			ui.Text(c, label.Load().(string))
 		})
@@ -1850,4 +1853,12 @@ func TestContentWindow(t *testing.T) {
 	click(w, 300, 250) // outside the box
 	click(w, 150, 80)
 	eventually(t, "the second click", func() bool { return clicks.Load() == 2 })
+
+	// A Control-click is a secondary click on macOS.
+	if controlClick(w, 100, 50) {
+		eventually(t, "the Control-click", func() bool { return rightClicks.Load() == 1 })
+		if clicks.Load() != 2 {
+			t.Errorf("the Control-click clicked: %d clicks", clicks.Load())
+		}
+	}
 }

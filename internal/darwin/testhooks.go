@@ -85,6 +85,22 @@ func TestClick(handle uintptr, x, y float64) {
 	})
 }
 
+// TestControlClick Control-clicks (x, y), in points from the top-left
+// corner of a window's content.
+func TestControlClick(handle uintptr, x, y float64) {
+	withPool(func() {
+		win := id(handle)
+		content := msgRect(send(win, "contentView"), sel("frame"))
+		loc := NSPoint{x, content.Size.Height - y}
+		number := sendInt(win, "windowNumber")
+		for _, typ := range []uint{1, 2} { // NSEventTypeLeftMouseDown, LeftMouseUp
+			ev := msgMouseEvent(class("NSEvent"), sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
+				typ, loc, 1<<18, 0, number, 0, 0, 1, 1) // NSEventModifierFlagControl
+			send(win, "sendEvent:", uintptr(ev))
+		}
+	})
+}
+
 // TestTrafficLights returns where the top-left corner of a window's close
 // button is, in points from the top-left corner of the window.
 func TestTrafficLights(handle uintptr) (x, y float64) {

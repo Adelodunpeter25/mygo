@@ -81,6 +81,7 @@ type surface struct {
 	lastFrame time.Time
 	cursor    platform.Cursor
 	inside    bool
+	ctrlClick bool // the primary button is down for a Control-click
 
 	textInput bool
 	caret     platform.RectF
@@ -340,19 +341,31 @@ func registerSurfaceClass() {
 	b := func() *Backend { return theBackend }
 	mouse := func(kind platform.SurfaceEventKind, button int) func(id, objc.SEL, id) {
 		return func(self id, _ objc.SEL, ev id) {
-			if s := b().surfaceOf(self); s != nil {
-				if kind == platform.PointerDown {
-					if button == 0 {
-						release(s.w.lastMouseDown)
-						s.w.lastMouseDown = retain(ev)
-					}
-					send(s.w.win, "makeFirstResponder:", uintptr(self))
+			s := b().surfaceOf(self)
+			if s == nil {
+				return
+			}
+			btn := button
+			switch {
+			case button == 2:
+				btn = min(sendInt(ev, "buttonNumber"), 2)
+			case button == 0 && kind == platform.PointerDown:
+				// A Control-click is a secondary click, until its release.
+				s.ctrlClick = eventMods(ev)&platform.ModCtrl != 0
+			}
+			if button == 0 && s.ctrlClick {
+				btn = 1
+			}
+			if kind == platform.PointerDown {
+				if btn == 0 {
+					release(s.w.lastMouseDown)
+					s.w.lastMouseDown = retain(ev)
 				}
-				btn := button
-				if button == 2 {
-					btn = min(sendInt(ev, "buttonNumber"), 2)
-				}
-				s.mouse(kind, ev, btn)
+				send(s.w.win, "makeFirstResponder:", uintptr(self))
+			}
+			s.mouse(kind, ev, btn)
+			if kind == platform.PointerUp && button == 0 {
+				s.ctrlClick = false
 			}
 		}
 	}

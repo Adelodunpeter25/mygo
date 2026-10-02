@@ -118,6 +118,9 @@ func topNonClient(w *mygo.Window) (px, want int32, supported bool) {
 	return px, want, true
 }
 
+// A Control-click is a secondary click on macOS only.
+func controlClick(*mygo.Window, float64, float64) bool { return false }
+
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
 func compose(*mygo.Window, string, int, bool) bool             { return false }

@@ -660,4 +660,23 @@ func (w *window) sendKey(up bool, keyval uint32, code uint16, state uint32) {
 	gdkEventFree(ev)
 }
 
+// pressAtPointer returns a press of the right mouse button at the pointer
+// over win, which gdk_event_free frees.
+func pressAtPointer(win ptr) ptr {
+	ev := xl.eventNew(4) // GDK_BUTTON_PRESS
+	pointer := gdkSeatGetPointer(gdkDisplayGetDefaultSeat(gdkDisplayGetDefault()))
+	var x, y int32
+	gdkWindowGetDevicePosition(win, pointer, &x, &y, nil)
+	// GdkEventButton: window 8, send_event 16, x 24, y 32, button 52;
+	// gdk_event_free releases the window.
+	p := *(*unsafe.Pointer)(unsafe.Pointer(&ev))
+	*(*ptr)(unsafe.Add(p, 8)) = gObjectRef(win)
+	*(*int8)(unsafe.Add(p, 16)) = 1
+	*(*float64)(unsafe.Add(p, 24)) = float64(x)
+	*(*float64)(unsafe.Add(p, 32)) = float64(y)
+	*(*uint32)(unsafe.Add(p, 52)) = 3
+	xl.eventSetDevice(ev, pointer)
+	return ev
+}
+
 func (h cefHost) DragEntered(paths []string) { h.w.dropped = paths }

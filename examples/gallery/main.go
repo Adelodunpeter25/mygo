@@ -1,7 +1,7 @@
 // Gallery tours MyGo's own user interface toolkit: a window drawn on the
 // GPU from Go, without a web page. It shows layout, the widgets, text
-// editing, a list of ten thousand rows, custom drawing, overlays and
-// updates from other goroutines.
+// editing, a list of ten thousand rows, custom drawing, overlays, file
+// drops and updates from other goroutines.
 //
 //	go run ./examples/gallery
 package main
@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -34,6 +35,7 @@ type gallery struct {
 	picked  int
 	dialog  bool
 	menu    bool
+	files   []string
 	now     time.Time
 	samples []float64
 }
@@ -121,6 +123,28 @@ func (g *gallery) overview(c *ui.Context) {
 		card(c, "Live data", func() {
 			ui.Text(c, "A goroutine pushes a sample every 200 ms with Window.Update.").TextColor(t.TextMuted).MaxWidth(260)
 			g.sparkline(c).Size(260, 80)
+		})
+		card(c, "Files", func() {
+			zone := ui.Column(c).Size(260, 80).Padding(8, 12).Gap(2).Radius(6).Background(t.Surface).
+				Border(1, t.Border).Justify(ui.Center).AlignItems(ui.Center)
+			if files := zone.DroppedFiles(); files != nil {
+				g.files = files
+			}
+			if zone.FileDragOver() {
+				zone.Border(2, t.Accent)
+			}
+			zone.Children(func() {
+				if len(g.files) == 0 {
+					ui.Text(c, "Drop files here").TextColor(t.TextMuted)
+				}
+				for i, f := range g.files {
+					if i == 3 {
+						ui.Text(c, fmt.Sprintf("and %d more", len(g.files)-i)).FontSize(12).TextColor(t.TextMuted)
+						break
+					}
+					ui.Text(c, filepath.Base(f)).FontSize(12).MaxLines(1)
+				}
+			})
 		})
 	})
 }

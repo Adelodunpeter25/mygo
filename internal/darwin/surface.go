@@ -207,6 +207,22 @@ func (s *surface) SetTextInput(active bool, caret platform.RectF) {
 	}
 }
 
+// surfaceKeyChanged tells the content of a window that became or ceased
+// to be the key window that its surface gained or lost the keyboard, as
+// focus events do on the other platforms: AppKit tells views only when
+// the first responder changes.
+func (w *window) surfaceKeyChanged(key bool) {
+	s := w.surface
+	if s == nil || send(w.win, "firstResponder") != s.view {
+		return
+	}
+	kind := platform.SurfaceBlur
+	if key {
+		kind = platform.SurfaceFocus
+	}
+	s.send(platform.SurfaceEvent{Kind: kind})
+}
+
 func (s *surface) send(ev platform.SurfaceEvent) {
 	if !s.w.closed {
 		s.w.h.SurfaceEvent(ev)

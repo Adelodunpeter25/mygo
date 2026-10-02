@@ -1796,9 +1796,9 @@ func TestContentWindowInputMethod(t *testing.T) {
 	})
 	composeOver(w, "e", 1, false, 3, 1)
 	// The text input methods get on macOS holds what they compose, the text
-	// they get through GTK does not.
+	// they get through GTK and IMM32 does not.
 	doc, sel := "cafe", [2]int{4, 0}
-	if runtime.GOOS == "linux" {
+	if runtime.GOOS != "darwin" {
 		doc, sel = "caf", [2]int{3, 0}
 	}
 	eventually(t, "the composition over the e", func() bool {

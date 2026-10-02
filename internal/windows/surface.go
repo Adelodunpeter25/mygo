@@ -66,6 +66,7 @@ const (
 	wmCaptureChanged     = 0x0215
 	wmImeSetContext      = 0x0281
 	wmImeChar            = 0x0286
+	wmGetObject          = 0x003D
 	dlgcWantAllKeys      = 0x0004
 	dlgcWantChars        = 0x0080
 	iscShowUICompWindow  = 0x80000000
@@ -117,6 +118,10 @@ type surface struct {
 	ime      bool
 	caret    platform.RectF
 	input    platform.TextInputState
+
+	reconvert  *[2]int // the runes a reconversion replaces
+	dropTarget uintptr // IDropTarget
+	access     *uiaTree
 }
 
 func registerSurfaceClass() {
@@ -143,6 +148,7 @@ func newSurface(w *window) *surface {
 	w.b.surfaces[s.hwnd] = s
 	// Input methods only come to text inputs.
 	procImmAssociateContextEx.Call(s.hwnd, 0, 0)
+	s.acceptFileDrops()
 	s.fit()
 	return s
 }
@@ -222,6 +228,7 @@ func (s *surface) SetTextInput(t platform.TextInputState) {
 		if active {
 			procImmAssociateContextEx.Call(s.hwnd, 0, iaceDefault)
 		} else {
+			s.reconvert = nil
 			if himc, _, _ := procImmGetContext.Call(s.hwnd); himc != 0 {
 				procImmNotifyIME.Call(himc, niCompositionStr, cpsComplete, 0)
 				procImmReleaseContext.Call(s.hwnd, himc)
@@ -417,7 +424,7 @@ func (s *surface) message(hwnd uintptr, m uint32, wp, lp uintptr) (uintptr, bool
 		}
 		if lp&gcsResultStr != 0 {
 			if text := imeString(himc, gcsResultStr); text != "" {
-				s.send(platform.SurfaceEvent{Kind: platform.TextInput, Text: text})
+				s.composed(platform.SurfaceEvent{Kind: platform.TextInput, Text: text})
 			}
 		}
 		if lp&gcsCompStr != 0 {
@@ -425,17 +432,24 @@ func (s *surface) message(hwnd uintptr, m uint32, wp, lp uintptr) (uintptr, bool
 			pos, _, _ := procImmGetCompositionStrW.Call(himc, gcsCursorPos, 0, 0)
 			units := utf16.Encode([]rune(text))
 			caret := len(utf16.Decode(units[:min(int(pos), len(units))]))
-			s.send(platform.SurfaceEvent{Kind: platform.TextComposition, Text: text, Caret: caret})
+			s.composed(platform.SurfaceEvent{Kind: platform.TextComposition, Text: text, Caret: caret})
 		}
 		procImmReleaseContext.Call(hwnd, himc)
 		s.placeIME()
 		return 0, true
 	case wmImeEndComp:
+		s.reconvert = nil
 		s.send(platform.SurfaceEvent{Kind: platform.TextComposition})
 		return 0, true
 	case wmImeChar:
 		return 0, true
+	case wmImeRequest:
+		return s.imeRequest(wp, lp), true
+	case wmGetObject:
+		return s.getObject(wp, lp)
 	case wmDestroy:
+		s.destroyAccess()
+		s.revokeFileDrops()
 		delete(s.w.b.surfaces, hwnd)
 		return 0, true
 	}

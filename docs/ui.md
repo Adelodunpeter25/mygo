@@ -261,7 +261,10 @@ func Disclosure(c *ui.Context, title string, body func()) {
   only while the element or one inside it has the focus, which comes first.
   `ui.Cmd` is Command on macOS and Ctrl elsewhere. Shortcuts of
   [menus](menus.md) still work, and the Edit menu's roles (cut, copy, paste,
-  select all, undo, redo) act on the focused text input.
+  select all, undo, redo) act on the focused text input. A focused text
+  input takes the editing keys of the platform first: on macOS, Option and
+  Command with the arrows and Backspace, and Control with A, E, B, F, N, P,
+  D, H and K, as in other Mac apps.
 - **Tooltips.** `Tooltip("…")` shows a tip once the pointer rests on the
   element.
 - **Custom title bars.** In a `Frameless` window, `DragWindow` makes an

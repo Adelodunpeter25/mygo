@@ -3,9 +3,14 @@
 package cef
 
 import (
+	"debug/elf"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -109,8 +114,61 @@ func load(dir string) error {
 		return fmt.Errorf("mygo: %s does not implement CEF API %d, which MyGo uses (CEF %s); its hash for it is %q, not %q", path, apiVersion, cefVersion, got, apiHash)
 	}
 	lib.getXDisplay, _ = purego.Dlsym(h, "cef_get_xdisplay")
+	releaseRelocations(path)
 	initCallbacks()
 	return nil
+}
+
+// releaseRelocations unmaps the pages of libcef.so's relocation table
+// from this process: the dynamic loader reads it once, as it loads the
+// library, and its 28 MB would stay resident in every process of the app.
+// The pages stay in the page cache for the loaders of the next processes.
+func releaseRelocations(path string) {
+	f, err := elf.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	rela := f.Section(".rela.dyn")
+	base := loadBase(f)
+	if rela == nil || base == 0 {
+		return
+	}
+	page := uintptr(os.Getpagesize())
+	start := (base + uintptr(rela.Addr) + page - 1) &^ (page - 1)
+	end := (base + uintptr(rela.Addr+rela.Size)) &^ (page - 1)
+	if end > start {
+		syscall.Syscall(syscall.SYS_MADVISE, start, end-start, syscall.MADV_DONTNEED)
+	}
+}
+
+// loadBase returns the address libcef.so, f, is loaded at: where the
+// mapping of its first loaded segment starts, less that segment's address.
+func loadBase(f *elf.File) uintptr {
+	var first *elf.Prog
+	for _, p := range f.Progs {
+		if p.Type == elf.PT_LOAD && p.Off == 0 {
+			first = p
+			break
+		}
+	}
+	maps, err := os.ReadFile("/proc/self/maps")
+	if first == nil || err != nil {
+		return 0
+	}
+	// start-end perms offset dev inode path
+	for _, line := range strings.Split(string(maps), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 6 || fields[2] != "00000000" || !strings.HasSuffix(fields[5], "/libcef.so") {
+			continue
+		}
+		start, err := strconv.ParseUint(strings.Split(fields[0], "-")[0], 16, 64)
+		if err != nil {
+			return 0
+		}
+		return uintptr(start) - uintptr(first.Vaddr)&^uintptr(os.Getpagesize()-1)
+	}
+	return 0
 }
 
 // XDisplay returns the Xlib display of CEF's own X11 connection, or 0.

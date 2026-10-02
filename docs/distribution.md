@@ -414,10 +414,10 @@ of WebKitGTK. Compared with WebKitGTK:
   that allows several stores its data apart (`CEF-2` next to `CEF` in
   `~/.config/<name>`).
 - CEF's builds play no H.264 or AAC; use VP9, AV1 or Opus.
-- The app takes more memory: Chromium runs a GPU process and network and
-  storage services besides the page's renderer, about twice WebKitGTK's
-  memory at rest (390 MB to 190 MB for a small page), of which 250 MB maps
-  Chromium's files, which the system shares and can reclaim.
+- The app takes more memory: Chromium runs a GPU process and a storage
+  service besides the page's renderer, about 350 MB at rest for a small
+  page where WebKitGTK takes 190 MB, of which 220 MB maps Chromium's
+  files, which the system shares and can reclaim.
 
 ## URL schemes and file types
 

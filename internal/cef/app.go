@@ -129,11 +129,12 @@ func Quit() {
 	}()
 }
 
-// disableFeatures adds features to the --disable-features switch of a
-// command line, keeping those it already names.
-func disableFeatures(commandLine uintptr, features ...string) {
+// addFeatures adds features to a switch of a command line that lists them,
+// --enable-features or --disable-features, keeping those it already names:
+// CEF disables features itself, and development builds take switches.
+func addFeatures(commandLine uintptr, list string, features ...string) {
 	cl := at[cefCommandLine](commandLine)
-	name := newStr("disable-features")
+	name := newStr(list)
 	if old := takeStr(call(cl.getSwitchValue, commandLine, name.p())); old != "" {
 		features = append([]string{old}, features...)
 	}
@@ -225,7 +226,10 @@ func initBrowserProcessClasses() {
 			// No spare renderer, which Chromium starts ahead of the next
 			// page: 20 MB more for every app, to show the page of a new
 			// window 20 ms sooner. Electron does without it too.
-			disableFeatures(commandLine, "SpareRendererForSitePerProcess")
+			addFeatures(commandLine, "disable-features", "SpareRendererForSitePerProcess")
+			// The network service runs in the app's process, as on Android,
+			// rather than in a process of its own: about 18 MB less.
+			addFeatures(commandLine, "enable-features", "NetworkServiceInProcess2")
 		},
 		"getBrowserProcessHandler": func(self uintptr) uintptr {
 			return browserProcess.ref(0)

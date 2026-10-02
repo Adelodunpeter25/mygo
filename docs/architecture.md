@@ -315,7 +315,10 @@ view, and each page method of the Linux window calls it when it is set.
   each process relocates the 12 MB of `libcef.so`'s `.data.rel.ro` itself,
   which the children of a zygote share in Chrome and Electron: a process
   costs about 20 MB, so Chromium's spare renderer, which it starts ahead of
-  the next page, is disabled.
+  the next page, is disabled, and the network service runs in the app's
+  process (`NetworkServiceInProcess2`, as on Android). Every process also
+  unmaps `libcef.so`'s 28 MB relocation table once it is loaded
+  (`releaseRelocations`): only the dynamic loader reads it.
 - **The message loop.** CEF starts before GTK, as cefclient does, with
   GDK's X11 backend, and `cef_run_message_loop` runs GLib's main loop,
   which dispatches GTK's events too. `Ready` comes once CEF's context is

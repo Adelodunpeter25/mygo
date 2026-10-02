@@ -1,18 +1,12 @@
 package text
 
 import (
-	"sort"
+	"math"
+	"slices"
 	"sync"
 	"unicode"
 
-	"github.com/go-text/typesetting/di"
-	"github.com/go-text/typesetting/font"
-	"github.com/go-text/typesetting/language"
-	"github.com/go-text/typesetting/shaping"
-	"golang.org/x/image/math/fixed"
-
 	"github.com/egoist/mygo/internal/scene"
-	"github.com/egoist/mygo/internal/vec"
 )
 
 // Style selects the font of a text.
@@ -34,7 +28,7 @@ func (s Style) weight() int {
 	if s.Weight <= 0 {
 		return 400
 	}
-	return s.Weight
+	return min(s.Weight, 999)
 }
 
 // FontSize returns the size in DIPs.
@@ -93,7 +87,7 @@ type Line struct {
 	// X, Y, Width and Height are the line's box; X includes the alignment.
 	X, Y, Width, Height float32
 	// Baseline is the y of the baseline; Ascent and Descent the extent of
-	// the glyphs above and below it.
+	// the fonts above and below it.
 	Baseline, Ascent, Descent float32
 	// Start and End are the line's runes; a newline ending it is not
 	// included.
@@ -107,8 +101,8 @@ type Line struct {
 
 // Glyph is a positioned glyph.
 type Glyph struct {
-	Face *font.Face
-	ID   font.GID
+	Font *Font
+	ID   uint32
 	// Size is the font size in DIPs.
 	Size float32
 	// X is the left of the glyph's advance box, Y its baseline.
@@ -120,14 +114,13 @@ type Glyph struct {
 	RTL            bool
 }
 
-// System lays out text and rasterizes glyphs. Use Shared.
+// System lays out text and rasterizes glyphs with the system's own text
+// engine. Use Shared.
 type System struct {
-	mu      sync.Mutex
-	fonts   fonts
-	shaper  shaping.HarfbuzzShaper
-	seg     shaping.Segmenter
-	wrapper shaping.LineWrapper
-	lang    language.Language
+	mu  sync.Mutex
+	eng engine
+	// fonts caches the font of each style.
+	fonts map[Style]*Font
 
 	layouts map[Params]*cached
 	frame   uint64
@@ -138,7 +131,6 @@ type System struct {
 	// recent the frame each of them was last drawn in.
 	transient map[uint64]GlyphImage
 	recent    map[uint64]uint64
-	raster    vec.Rasterizer
 	// MaskAtlas holds coverage masks, ColorAtlas color glyphs.
 	MaskAtlas, ColorAtlas *scene.Atlas
 	// full tells which atlases (mask, color) left out something the frame
@@ -160,7 +152,7 @@ var shared = sync.OnceValue(newSystem)
 
 func newSystem() *System {
 	return &System{
-		lang:       language.DefaultLanguage(),
+		fonts:      map[Style]*Font{},
 		layouts:    map[Params]*cached{},
 		glyphs:     map[glyphKey]*atlasEntry{},
 		masks:      map[uint64]*atlasEntry{},
@@ -174,31 +166,34 @@ func newSystem() *System {
 // Shared returns the process-wide text system.
 func Shared() *System { return shared() }
 
+// engine starts the system's text engine on first use.
+func (s *System) engine() engine {
+	if s.eng == nil {
+		s.eng = newEngine()
+	}
+	return s.eng
+}
+
 // RegisterFont adds a TrueType or OpenType font (or collection) to the
 // fonts text can use, under family, or the font's own family name when
 // family is empty.
 func (s *System) RegisterFont(data []byte, family string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	data = append([]byte(nil), data...)
-	if s.fonts.fm == nil {
-		s.fonts.pending = append(s.fonts.pending, registered{data, family})
-		return nil
-	}
-	if err := addFont(s.fonts.fm, data, family); err != nil {
+	if err := s.engine().register(data, family); err != nil {
 		return err
 	}
-	s.fonts.queried = false
+	clear(s.fonts)
 	clear(s.layouts)
 	return nil
 }
 
-// Preload loads the system fonts, which the first layout otherwise waits
-// for.
+// Preload starts the text engine and finds the system UI font, which the
+// first layout otherwise waits for.
 func (s *System) Preload() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.fonts.load()
+	s.font(Style{})
 }
 
 // EndFrame forgets layouts no frame used for a while. The ui package calls
@@ -242,43 +237,45 @@ func (s *System) Layout(p Params) *Layout {
 func (s *System) Metrics(style Style) (ascent, descent, lineHeight float32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.fonts.load()
-	s.fonts.setQuery(style)
-	face := s.fonts.fm.ResolveFace('A')
-	a, d, h := faceMetrics(face, style)
-	return a, d, h
+	m := metricsOf(s.font(style), style)
+	return m.ascent, m.descent, m.lineHeight
 }
 
-func faceMetrics(face *font.Face, style Style) (ascent, descent, lineHeight float32) {
+// font returns the font of a style.
+func (s *System) font(style Style) *Font {
+	key := Style{Family: style.Family, Size: style.FontSize(), Weight: style.weight(), Italic: style.Italic}
+	if f, ok := s.fonts[key]; ok {
+		return f
+	}
+	f := s.engine().font(key)
+	if len(s.fonts) >= 1024 {
+		clear(s.fonts)
+	}
+	s.fonts[key] = f
+	return f
+}
+
+// lineMetrics are the vertical metrics of a style's lines.
+type lineMetrics struct {
+	ascent, descent, lineHeight float32
+}
+
+func metricsOf(f *Font, style Style) lineMetrics {
 	size := style.FontSize()
-	ascent, descent = size*0.8, size*0.2
+	m := lineMetrics{ascent: size * 0.8, descent: size * 0.2}
 	gap := float32(0)
-	if face != nil {
-		if ext, ok := face.FontHExtents(); ok && ext.Ascender > 0 {
-			upem := float32(face.Upem())
-			ascent = ext.Ascender / upem * size
-			descent = -ext.Descender / upem * size
-			gap = max(ext.LineGap/upem*size, 0)
-		}
+	if f != nil && f.Ascent > 0 {
+		m.ascent, m.descent, gap = f.Ascent, f.Descent, max(f.LineGap, 0)
 	}
-	lineHeight = ascent + descent + gap
+	m.lineHeight = m.ascent + m.descent + gap
 	if style.LineHeight > 0 {
-		lineHeight = style.LineHeight * size
+		m.lineHeight = style.LineHeight * size
 	}
-	return ascent, descent, lineHeight
+	return m
 }
-
-func toFixed(v float32) fixed.Int26_6 { return fixed.Int26_6(v*64 + 0.5) }
-
-func fromFixed(v fixed.Int26_6) float32 { return float32(v) / 64 }
 
 func (s *System) layout(p Params) *Layout {
-	s.fonts.load()
-	s.fonts.setQuery(p.Style)
-	size := p.Style.FontSize()
-	primary := s.fonts.fm.ResolveFace('A')
-	ascent, descent, lineHeight := faceMetrics(primary, p.Style)
-
+	m := metricsOf(s.font(p.Style), p.Style)
 	runes := []rune(p.Text)
 	l := &Layout{Params: p, Runes: runes}
 	y := float32(0)
@@ -287,13 +284,13 @@ func (s *System) layout(p Params) *Layout {
 		for end < len(runes) && runes[end] != '\n' {
 			end++
 		}
-		remaining := 0
+		maxLines := 0
 		if p.MaxLines > 0 {
-			remaining = p.MaxLines - len(l.Lines)
+			maxLines = p.MaxLines - len(l.Lines)
 		}
-		lines, truncated := s.paragraph(p, runes, start, end, primary, ascent, descent, lineHeight, &y, remaining, end < len(runes))
+		lines, truncated := s.paragraph(p, runes, start, end, maxLines, end < len(runes), m, &y)
 		l.Lines = append(l.Lines, lines...)
-		if truncated || (p.MaxLines > 0 && len(l.Lines) >= p.MaxLines && end < len(runes)) {
+		if truncated {
 			l.Truncated = true
 			break
 		}
@@ -333,118 +330,193 @@ func (s *System) layout(p Params) *Layout {
 			}
 		}
 	}
-	_ = size
 	return l
 }
 
-// paragraph lays out runes[start:end], a paragraph without newlines, from
-// *y down, and moves *y past it.
-func (s *System) paragraph(p Params, runes []rune, start, end int, primary *font.Face, ascent, descent, lineHeight float32, y *float32, maxLines int, continues bool) ([]Line, bool) {
-	size := p.Style.FontSize()
-	para := runes[start:end]
-	dir := direction(para)
-	rtl := dir == di.DirectionRTL
-	if len(para) == 0 || primary == nil {
-		line := Line{Y: *y, Height: lineHeight, Ascent: ascent, Descent: descent, Start: start, End: end, RTL: rtl}
-		line.Baseline = *y + (lineHeight-ascent-descent)/2 + ascent
-		*y += lineHeight
-		return []Line{line}, false
+// paragraph lays out runes[start:end], a paragraph without newlines, in at
+// most maxLines lines (0 is unlimited) from *y down, and moves *y past it.
+// It reports whether it cut the text, which continues after the paragraph
+// when continues is set.
+func (s *System) paragraph(p Params, runes []rune, start, end, maxLines int, continues bool, m lineMetrics, y *float32) ([]Line, bool) {
+	text := runes[start:end]
+	// A carriage return before the newline is part of it.
+	if n := len(text); n > 0 && text[n-1] == '\r' {
+		text = text[:n-1]
 	}
-	in := shaping.Input{Text: para, RunEnd: len(para), Direction: dir, Size: toFixed(size), Language: s.lang}
-	inputs := s.seg.Split(in, s.fonts.fm)
-	outs := make([]shaping.Output, len(inputs))
-	for i, input := range inputs {
-		outs[i] = s.shaper.Shape(input)
+	rtl := isRTL(text)
+	var shaped []shapedLine
+	if len(text) > 0 {
+		shaped = s.engine().shape(text, p.Style, max(p.Width, 0), rtl, p.NoBreakWords)
 	}
-	cfg := shaping.WrapConfig{Direction: dir, DisableTrailingWhitespaceTrim: p.KeepSpaces}
-	if p.NoBreakWords {
-		cfg.BreakPolicy = shaping.Never
+	if len(shaped) == 0 {
+		shaped = []shapedLine{{end: len(text)}}
 	}
-	var ellipsis *shaping.Output
-	if maxLines > 0 {
-		cfg.TruncateAfterLines = maxLines
-		cfg.TextContinues = continues
-		cfg = cfg.WithTruncator(&s.shaper, shaping.Input{Text: []rune{'…'}, RunEnd: 1, Direction: dir, Face: primary, Size: toFixed(size), Language: s.lang})
-		ellipsis = &cfg.Truncator
+	truncated := false
+	if maxLines > 0 && (len(shaped) > maxLines || len(shaped) == maxLines && continues) {
+		last := s.ellipsize(text, shaped[maxLines-1].start, p, rtl)
+		shaped = append(shaped[:maxLines-1], last)
+		truncated = true
 	}
-	width := p.Width
-	if width <= 0 {
-		width = 1 << 24
+	lines := make([]Line, len(shaped))
+	for i, sl := range shaped {
+		lines[i] = line(p, text, sl, start, rtl, m, y)
 	}
-	wrapped, truncated := s.wrapper.WrapParagraphF(cfg, toFixed(width), para, shaping.NewSliceIterator(outs))
-	lines := make([]Line, 0, len(wrapped))
-	for li, runs := range wrapped {
-		line := Line{Y: *y, Start: end, End: start, RTL: rtl, Ascent: ascent, Descent: descent}
-		isLast := li == len(wrapped)-1
-		visual := make([]int, len(runs))
-		for i, run := range runs {
-			visual[i] = i
-			if isLast && truncated > 0 && ellipsis != nil && i == len(runs)-1 {
-				continue
-			}
-			line.Start = min(line.Start, start+run.Runes.Offset)
-			line.End = max(line.End, start+run.Runes.Offset+run.Runes.Count)
-			line.Ascent = max(line.Ascent, fromFixed(run.LineBounds.Ascent))
-			line.Descent = max(line.Descent, -fromFixed(run.LineBounds.Descent))
-		}
-		if line.Start > line.End {
-			line.Start, line.End = start, start
-		}
-		sort.SliceStable(visual, func(a, b int) bool { return runs[visual[a]].VisualIndex < runs[visual[b]].VisualIndex })
-		line.Height = max(lineHeight, line.Ascent+line.Descent)
-		line.Baseline = *y + (line.Height-line.Ascent-line.Descent)/2 + line.Ascent
-		pen := float32(0)
-		for _, i := range visual {
-			run := runs[i]
-			isEllipsis := isLast && truncated > 0 && ellipsis != nil && i == len(runs)-1
-			runRTL := run.Direction.Progression() == di.TowardTopLeft
-			for _, g := range run.Glyphs {
-				gl := Glyph{
-					Face: run.Face, ID: g.GlyphID, Size: size,
-					X:       pen + fromFixed(g.XOffset),
-					Y:       line.Baseline - fromFixed(g.YOffset),
-					Advance: fromFixed(g.Advance),
-					Cluster: start + g.ClusterIndex, Runes: g.RuneCount,
-					RTL: runRTL,
-				}
-				if isEllipsis {
-					gl.Cluster, gl.Runes = line.End, 0
-				}
-				line.Glyphs = append(line.Glyphs, gl)
-				pen += fromFixed(g.Advance)
-			}
-		}
-		line.Width = pen
-		*y += line.Height
-		lines = append(lines, line)
-	}
-	if len(lines) == 0 {
-		line := Line{Y: *y, Height: lineHeight, Ascent: ascent, Descent: descent, Start: start, End: end, RTL: rtl}
-		line.Baseline = *y + (lineHeight-ascent-descent)/2 + ascent
-		*y += lineHeight
-		lines = append(lines, line)
-	}
-	// Runes the wrapper trimmed (spaces at a soft break) belong to the line
-	// before the next one.
+	// Runes between lines, if an engine left any out, belong to the line
+	// before.
 	for i := 0; i < len(lines)-1; i++ {
 		lines[i].End = max(lines[i].End, lines[i+1].Start)
 	}
-	if truncated == 0 {
+	if !truncated {
 		lines[len(lines)-1].End = end
 	}
-	return lines, truncated > 0
+	return lines, truncated
 }
 
-// direction returns the direction of a paragraph: that of its first
-// strongly directional rune.
-func direction(para []rune) di.Direction {
+// line positions a line of the paragraph text, which starts at rune
+// offset of the layout, with its top at *y, and moves *y past it.
+func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetrics, y *float32) Line {
+	line := Line{Start: offset + sl.start, End: offset + sl.end, RTL: rtl, Ascent: m.ascent, Descent: m.descent}
+	// Whitespace ending a line takes no room, unless kept.
+	trim := sl.end
+	if !p.KeepSpaces {
+		for trim > sl.start && unicode.IsSpace(text[trim-1]) {
+			trim--
+		}
+	}
+	size := p.Style.FontSize()
+	x0, x1 := float32(math.MaxFloat32), float32(-math.MaxFloat32)
+	var starts []int
+	for _, run := range sl.runs {
+		if f := run.font; f != nil {
+			line.Ascent = max(line.Ascent, f.Ascent)
+			line.Descent = max(line.Descent, f.Descent)
+		}
+		// A cluster holds the runes up to the next one of its run.
+		starts = starts[:0]
+		for _, g := range run.glyphs {
+			if g.Cluster >= 0 {
+				starts = append(starts, g.Cluster)
+			}
+		}
+		slices.Sort(starts)
+		starts = slices.Compact(starts)
+		for _, g := range run.glyphs {
+			if g.Cluster < 0 { // the ellipsis
+				g.Cluster = line.End
+			} else {
+				if g.Cluster >= trim && g.Cluster < sl.end {
+					continue
+				}
+				next := run.end
+				if i, _ := slices.BinarySearch(starts, g.Cluster); i+1 < len(starts) {
+					next = starts[i+1]
+				}
+				g.Runes = max(next-g.Cluster, 1)
+				g.Cluster += offset
+			}
+			g.Size = size
+			x0, x1 = min(x0, g.X), max(x1, g.X+g.Advance)
+			line.Glyphs = append(line.Glyphs, g)
+		}
+	}
+	if len(line.Glyphs) == 0 {
+		x0, x1 = 0, 0
+	}
+	line.Width = x1 - x0
+	line.Height = max(m.lineHeight, line.Ascent+line.Descent)
+	line.Y = *y
+	line.Baseline = *y + (line.Height-line.Ascent-line.Descent)/2 + line.Ascent
+	for i := range line.Glyphs {
+		line.Glyphs[i].X -= x0
+		line.Glyphs[i].Y += line.Baseline
+	}
+	*y += line.Height
+	return line
+}
+
+// ellipsize lays out the paragraph text from rune start on one line ending
+// with an ellipsis: as many of its graphemes as fit the width with it.
+func (s *System) ellipsize(text []rune, start int, p Params, rtl bool) shapedLine {
+	e := s.engine()
+	rest := text[start:]
+	cut := len(rest)
+	if p.Width > 0 {
+		var ellipsis float32
+		for _, l := range e.shape([]rune{'…'}, p.Style, 0, rtl, false) {
+			ellipsis = max(ellipsis, advance(l))
+		}
+		// The advance of each cluster, at its first rune.
+		advances := make([]float32, len(rest))
+		for _, l := range e.shape(rest, p.Style, 0, rtl, false) {
+			for _, run := range l.runs {
+				for _, g := range run.glyphs {
+					if g.Cluster >= 0 && g.Cluster < len(rest) {
+						advances[g.Cluster] += g.Advance
+					}
+				}
+			}
+		}
+		var b Boundaries
+		b.Reset(rest)
+		w := float32(0)
+		cut = 0
+		for cut < len(rest) {
+			next := b.NextGrapheme(cut)
+			gw := float32(0)
+			for _, a := range advances[cut:next] {
+				gw += a
+			}
+			if w+gw+ellipsis > p.Width {
+				break
+			}
+			w += gw
+			cut = next
+		}
+	}
+	for cut > 0 && unicode.IsSpace(rest[cut-1]) {
+		cut--
+	}
+	t := make([]rune, cut+1)
+	copy(t, rest[:cut])
+	t[cut] = '…'
+	out := shapedLine{start: start, end: start + cut}
+	for _, l := range e.shape(t, p.Style, 0, rtl, false) {
+		for _, run := range l.runs {
+			run.start, run.end = start+min(run.start, cut), start+min(run.end, cut)
+			for i := range run.glyphs {
+				if g := &run.glyphs[i]; g.Cluster >= cut {
+					g.Cluster = -1
+				} else {
+					g.Cluster += start
+				}
+			}
+			out.runs = append(out.runs, run)
+		}
+	}
+	return out
+}
+
+// advance returns the width a shaped line's glyphs take.
+func advance(l shapedLine) float32 {
+	x0, x1 := float32(math.MaxFloat32), float32(-math.MaxFloat32)
+	for _, run := range l.runs {
+		for _, g := range run.glyphs {
+			x0, x1 = min(x0, g.X), max(x1, g.X+g.Advance)
+		}
+	}
+	return max(x1-x0, 0)
+}
+
+// isRTL reports whether a paragraph is right-to-left: whether its first
+// strongly directional rune is.
+func isRTL(para []rune) bool {
 	for _, r := range para {
 		switch {
 		case unicode.In(r, unicode.Hebrew, unicode.Arabic, unicode.Syriac, unicode.Thaana, unicode.Nko, unicode.Samaritan, unicode.Mandaic, unicode.Adlam):
-			return di.DirectionRTL
+			return true
 		case unicode.IsLetter(r):
-			return di.DirectionLTR
+			return false
 		}
 	}
-	return di.DirectionLTR
+	return false
 }

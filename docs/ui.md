@@ -157,9 +157,10 @@ the text or on any element above it, whose texts inherit them. `SingleLine`
 keeps text on one line, cut with an ellipsis, and `MaxLines` limits it to a
 few.
 
-Text uses the system's font (Segoe UI on Windows, SF on macOS, the desktop's
-on Linux), shaped with HarfBuzz rules, with fonts of the system for other
-scripts and right-to-left text in its order. `Font("monospace")` picks the
+Text is laid out and drawn by the system's own text engine (DirectWrite on
+Windows, Core Text on macOS, Pango on Linux) in the system's font (Segoe UI,
+SF, the desktop's sans-serif), falling back to the system's fonts for other
+scripts and emoji as native apps do, with right-to-left text in its order. `Font("monospace")` picks the
 system's monospaced font, and `ui.RegisterFont` adds your own:
 
 ```go

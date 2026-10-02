@@ -863,7 +863,7 @@ either.
 
 ```
  view (Go) ──► ui: build, layout, paint ──► internal/scene ──► internal/gpu/d3d11 | internal/raster
-                 ▲       └─ internal/text: shaping, glyph and mask atlases
+                 ▲       └─ internal/text: DirectWrite | Core Text | Pango, glyph and mask atlases
                  │
  internal/surface.Conn ◄── content.go (package mygo) ◄── platform.Surface: darwin | linux | windows | fake
 ```
@@ -905,13 +905,24 @@ either.
   rectangles with borders and linear gradients, shadows (blurred rounded
   rectangles), runs of glyphs, images, and pushed and popped clips.
   Renderers draw the whole scene each frame and retain only textures.
-- **Text.** `internal/text` shapes with go-text/typesetting (HarfBuzz's
-  algorithms in Go), splits runs by script, direction and font, falls back
-  through the system's fonts, wraps lines and caches layouts by their
-  parameters. `internal/vec` rasterizes glyph outlines into a coverage atlas
-  at four subpixel offsets; PNG glyphs (color emoji) go into a color atlas,
-  and paths drawn with `Painter` are masks in the coverage atlas. An atlas
-  logs the rectangles that change, so renderers upload only those.
+- **Text.** `internal/text` lays out text with the system's own text stack,
+  behind a small `engine` interface: DirectWrite on Windows
+  (`IDWriteTextLayout`, with an `IDWriteTextRenderer` implemented in Go
+  collecting its glyph runs), Core Text on macOS (`CTTypesetter`, with
+  `NSFont` for the system font's weights) and Pango on Linux (with
+  fontconfig and HarfBuzz underneath, as in GTK). They find the fonts, fall
+  back to other fonts for what one lacks, shape, run the bidirectional
+  algorithm and break lines; font files stay memory mapped and shared with
+  every other process. The package assembles their lines into layouts, with
+  its own whitespace trimming, ellipsis, alignment, carets and selection, so
+  those behave the same everywhere, and caches layouts by their parameters.
+  The engines rasterize glyphs too (`IDWriteGlyphRunAnalysis`,
+  `CTFontDrawGlyphs`, cairo), at four subpixel offsets, into a coverage
+  atlas, and color glyphs (emoji) into a color atlas; paths drawn with
+  `Painter` are masks in the coverage atlas, rasterized by `internal/vec`.
+  An atlas logs the rectangles that change, so renderers upload only those.
+  DirectWrite methods taking floats are called through purego, which sets
+  the floating point registers that `syscall` leaves alone on ARM64.
 - **Atlas lifetime.** A mask drawn for the first time goes to the
   transient zone at the bottom of the atlas, which the next frame frees,
   and moves to the lasting zone at the top once another frame draws it, so

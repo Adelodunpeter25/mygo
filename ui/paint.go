@@ -183,7 +183,7 @@ func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textS
 			}
 			ix := float32(math.Floor(float64(pen)))
 			sub := int((pen - ix) * text.SubpixelSteps)
-			gi := sys.Glyph(g.Face, g.ID, g.Size*s, sub)
+			gi := sys.Glyph(g.Font, g.ID, s, sub)
 			if !gi.OK {
 				continue
 			}

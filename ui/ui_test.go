@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	"github.com/egoist/mygo/internal/platform"
 )
 
 // savePNG writes the tester's frame into the directory MYGO_UI_PNG names,
@@ -157,6 +160,50 @@ func TestTyping(t *testing.T) {
 		t.Errorf("undid to %q", d.name)
 	}
 	savePNG(t, tt, "typing")
+}
+
+// TestTextInputFollowsTheFocusAtOnce checks that input moving the focus
+// turns text input on or off before the next frame: a platform sends the
+// text of keys to the view only while it is on, and keys may come before
+// that frame.
+func TestTextInputFollowsTheFocusAtOnce(t *testing.T) {
+	d := &demo{}
+	tt := NewTester(d.view, 640, 600)
+	r, _ := tt.Find("I agree")
+	r.Y += 40
+	x, y := float64(r.X+20), float64(r.Y+r.H/2)
+	// Events without frames between them, as between two display refreshes.
+	tt.rt.event(platform.SurfaceEvent{Kind: platform.PointerDown, X: x, Y: y})
+	if !tt.h.ime {
+		t.Fatal("pressing the text input turned text input on only at the next frame")
+	}
+	tt.rt.event(platform.SurfaceEvent{Kind: platform.PointerUp, X: x, Y: y})
+	tt.rt.event(platform.SurfaceEvent{Kind: platform.TextInput, Text: "Ada"})
+	tt.rt.event(platform.SurfaceEvent{Kind: platform.KeyPressed, Key: platform.KeyTab})
+	if tt.h.ime {
+		t.Error("Tab out of the text input turned text input off only at the next frame")
+	}
+	tt.Frame()
+	if d.name != "Ada" {
+		t.Errorf("typed %q", d.name)
+	}
+}
+
+// TestKeyOnAWidget checks that keying a widget which used its state as it
+// was created panics rather than lose its input: the radio would never
+// see its clicks.
+func TestKeyOnAWidget(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "Key on a Radio") {
+			t.Errorf("Key on a Radio: recovered %v", r)
+		}
+	}()
+	choice := "a"
+	NewTester(func(c *Context) {
+		Row(c).Key("ok").Children(func() {
+			Radio(c, &choice, "b", "Beta").Key("b")
+		})
+	}, 200, 100)
 }
 
 func TestListScrollsAndSelects(t *testing.T) {

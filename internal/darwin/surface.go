@@ -97,7 +97,7 @@ func (w *window) createSurface(content NSRect) {
 	if respondsTo(s.view, "displayLinkWithTarget:selector:") {
 		s.link = retain(send(s.view, "displayLinkWithTarget:selector:", uintptr(s.view), uintptr(sel("mygoTick:"))))
 		send(s.link, "setPaused:", 1)
-		send(s.link, "addToRunLoop:forMode:", uintptr(send(class("NSRunLoop"), "mainRunLoop")), uintptr(nsString("kCFRunLoopCommonModes")))
+		send(s.link, "addToRunLoop:forMode:", uintptr(send(class("NSRunLoop"), "mainRunLoop")), kCFRunLoopCommonModes)
 	}
 	w.surface = s
 	w.b.bySurface[s.view] = s
@@ -205,6 +205,22 @@ func (s *surface) SetTextInput(active bool, caret platform.RectF) {
 	if active {
 		send(send(s.view, "inputContext"), "invalidateCharacterCoordinates")
 	}
+}
+
+// surfaceKeyChanged tells the content of a window that became or ceased
+// to be the key window that its surface gained or lost the keyboard, as
+// focus events do on the other platforms: AppKit tells views only when
+// the first responder changes.
+func (w *window) surfaceKeyChanged(key bool) {
+	s := w.surface
+	if s == nil || send(w.win, "firstResponder") != s.view {
+		return
+	}
+	kind := platform.SurfaceBlur
+	if key {
+		kind = platform.SurfaceFocus
+	}
+	s.send(platform.SurfaceEvent{Kind: kind})
 }
 
 func (s *surface) send(ev platform.SurfaceEvent) {
@@ -399,7 +415,8 @@ func registerSurfaceClass() {
 			dx, dy := msgFloat(ev, sel("scrollingDeltaX")), msgFloat(ev, sel("scrollingDeltaY"))
 			precise := sendBool(ev, "hasPreciseScrollingDeltas")
 			if !precise {
-				dx, dy = dx*16, dy*16
+				// A mouse wheel scrolls by lines: 40 DIPs, as in browsers.
+				dx, dy = dx*40, dy*40
 			}
 			s.send(platform.SurfaceEvent{Kind: platform.PointerScroll, X: x, Y: y, DX: -dx, DY: -dy, Precise: precise, Mods: eventMods(ev)})
 		}),

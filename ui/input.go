@@ -52,6 +52,12 @@ func (rt *engine) event(ev platform.SurfaceEvent) {
 		}
 		rt.requestFrame()
 	}
+	if ev.Kind != platform.SurfaceFrame {
+		// A press or Tab may have moved the focus: tell the host now, not
+		// after the next frame, or the text of keys typed before it would
+		// never reach the input method.
+		rt.updateTextInput()
+	}
 }
 
 // hitChain returns the ids of the topmost element at (x, y) and of its

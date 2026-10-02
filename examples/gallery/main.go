@@ -155,7 +155,7 @@ func (g *gallery) controls(c *ui.Context) {
 		})
 		ui.Row(c).Gap(18).Children(func() {
 			for _, p := range []string{"Free", "Pro", "Team"} {
-				ui.Radio(c, &g.plan, p, p).Key(p)
+				ui.Radio(c, &g.plan, p, p)
 			}
 		})
 		ui.Row(c).Gap(10).Children(func() {

@@ -1016,11 +1016,13 @@ func registerWindowClasses() {
 			method("windowDidBecomeKey:", func(self id, _ objc.SEL, n id) {
 				if w := b().windowFor(self); w != nil {
 					w.h.Focused()
+					w.surfaceKeyChanged(true)
 				}
 			}),
 			method("windowDidResignKey:", func(self id, _ objc.SEL, n id) {
 				if w := b().windowFor(self); w != nil {
 					w.h.Blurred()
+					w.surfaceKeyChanged(false)
 				}
 			}),
 			method("windowDidResize:", func(self id, _ objc.SEL, n id) {

@@ -524,6 +524,10 @@ func textInput(c *Context, value *string, multiline bool) *Element {
 	t := c.theme
 	e := c.newElement(kindInput)
 	e.flags |= flagEditable | flagFocusable | flagHover
+	e.widget = "TextInput"
+	if multiline {
+		e.widget = "TextArea"
+	}
 	st := e.st
 	if st.editor == nil {
 		st.editor = newEditor()
@@ -537,10 +541,9 @@ func textInput(c *Context, value *string, multiline bool) *Element {
 		ed.compose = ""
 	}
 	focused := c.rt.focused == e.id
-	if !focused {
-		ed.compose = ""
-		ed.queue = ed.queue[:0]
-	} else {
+	// Input queued while the input had the focus applies even when the
+	// focus left before this frame, as with text typed right before Tab.
+	if focused || len(ed.queue) > 0 {
 		before := string(ed.text)
 		ed.process(c, e)
 		if after := string(ed.text); after != before {
@@ -548,6 +551,9 @@ func textInput(c *Context, value *string, multiline bool) *Element {
 			st.changed = true
 			c.rt.consumed = true
 		}
+	}
+	if !focused {
+		ed.compose = ""
 	}
 	e.Padding(6, 10).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 	if multiline {

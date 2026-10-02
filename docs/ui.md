@@ -88,6 +88,10 @@ for i := range app.todos {
 }
 ```
 
+Widgets that handle their input as they are created, such as `Checkbox`
+here, take the key from an element around them: `Key` panics on them, as
+their state would be lost.
+
 ### Change the state from other goroutines
 
 The view reads your state on the main thread. Change it from other

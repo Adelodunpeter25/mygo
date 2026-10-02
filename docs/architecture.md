@@ -868,7 +868,8 @@ either.
   macOS, a GtkDrawingArea on Linux, a child window of class `MyGoSurface`
   on Windows. `platform.Surface` gives its native handle (for a swap
   chain), size and scale; asks for a frame (`RequestFrame`: a paused
-  `CADisplayLink`, `gtk_widget_queue_draw`, `InvalidateRect`); presents
+  `CADisplayLink`, before macOS 14 an `NSTimer` at the display's rate,
+  `gtk_widget_queue_draw`, `InvalidateRect`); presents
   pixels drawn on the CPU (`PresentPixels`: a CGImage as the layer's
   contents, cairo in the `draw` signal, `SetDIBitsToDevice` in `WM_PAINT`);
   sets the cursor; and turns the input method on and off at the caret
@@ -1281,5 +1282,5 @@ which npm allows only for packages that exist: the first release uses an
 | content protection, click-through | yes | ignored | yes |
 | custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost` | `http://<scheme>.localhost` (the page's `location`) |
 | window.open | keeps the opener | independent window | independent window |
-| native UI surface | layer-backed NSView, frames from `CADisplayLink`, input methods through NSTextInputClient | GtkDrawingArea, GtkIMMulticontext | `MyGoSurface` child window, IMM32 |
+| native UI surface | layer-backed NSView, frames from `CADisplayLink` (a timer at the display's rate before macOS 14), input methods through NSTextInputClient | GtkDrawingArea, GtkIMMulticontext | `MyGoSurface` child window, IMM32 |
 | native UI rendering | Metal, into a CAMetalLayer presenting with the Core Animation transaction | CPU, painted with cairo | Direct3D 11 (WARP without a GPU), flip-model swap chain |

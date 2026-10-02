@@ -51,7 +51,8 @@ in a clone of the repository.
 One app can have windows of both kinds. Native UI suits tools, settings,
 inspectors and utilities, and apps that must start instantly; a web page
 suits rich documents, existing web code and anything that needs what only
-a browser has. Native UI does not yet expose its elements to screen readers.
+a browser has. Screen readers and other assistive technology read native
+UI as they read other apps (see [Accessibility](#accessibility)).
 
 ## Views
 
@@ -266,6 +267,26 @@ func Disclosure(c *ui.Context, title string, body func()) {
   input takes the editing keys of the platform first: on macOS, Option and
   Command with the arrows and Backspace, and Control with A, E, B, F, N, P,
   D, H and K, as in other Mac apps.
+- **Input methods.** Text inputs take text composed with input methods,
+  which see the text around the caret: macOS's press and hold replaces the
+  letter it accents, Japanese input methods convert typed text again, and
+  others predict from what comes before.
+- **Files.** `DroppedFiles` returns the paths of the files dropped on the
+  element from Finder, Explorer or a file manager, and `FileDragOver`
+  reports files dragged over it, to show it would take them. The window
+  takes files only over such elements, or anywhere when it has
+  `OnFileDrop` listeners, which get the files no element takes, with where
+  they were dropped:
+
+  ```go
+  zone := ui.Column(c).Size(260, 80).Border(1, t.Border)
+  if files := zone.DroppedFiles(); files != nil {
+  	app.files = files
+  }
+  if zone.FileDragOver() {
+  	zone.Border(2, t.Accent)
+  }
+  ```
 - **Tooltips.** `Tooltip("…")` shows a tip once the pointer rests on the
   element.
 - **Custom title bars.** In a `Frameless` window, `DragWindow` makes an
@@ -298,6 +319,38 @@ ui.Modal(c, &app.renaming, func() {
 `ui.Overlay` builds elements above everything else, placed with `Absolute`
 in DIPs of the window. Native [dialogs](native.md#dialogs) work too: call
 them from a goroutine, so that the view does not wait for them.
+
+## Accessibility
+
+Assistive technology, such as VoiceOver on macOS, Orca on Linux and
+Narrator or NVDA on Windows, reads a window's native UI as it reads other
+apps: the widgets with their roles, names, values and states, the texts,
+and the elements that take the focus, as the content changes. It acts on
+them as the keyboard and the pointer would: it presses buttons, checks
+boxes, moves sliders, edits text inputs and moves the focus.
+
+Widgets describe themselves, and the text inside an element names it, as
+a button's does. Elements without text need a `Label`, which also finds
+them in [tests](#testing):
+
+```go
+ui.Slider(c, &app.volume, 0, 100).Label("Volume")
+ui.TextInput(c, &app.query).Placeholder("Search").Label("Search")
+ui.Box(c).Size(24, 24).Draw(drawIcon).Label("Unread messages")
+```
+
+Other elements get a role from what they do: one that is clickable and
+takes the focus is a button, a scroll container a scroll area, and one
+with a `Label`, or that takes the focus, a group. `Role` sets it for an
+element drawn as a widget it is not built from, and `ui.RoleNone` leaves
+an element out but not its children:
+
+```go
+toggle := ui.Box(c).Size(36, 20).Focusable().Role(ui.RoleSwitch).Label("Wi-Fi")
+```
+
+MyGo describes frames only once assistive technology asked, so apps pay
+nothing for it otherwise.
 
 ## Drawing and animation
 

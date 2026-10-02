@@ -351,9 +351,9 @@ ui.Image(c, logo).Size(64, 64).Fit(ui.Contain).Radius(12)
 
 A window with `Content` takes the [window options](windows.md#options) of
 any window, such as its size, `StateKey`, `Frameless` and `Parent`, as well
-as menus, dialogs and the other native APIs. It has no page: it ignores
-`URL` and the options of pages, and the methods of pages do nothing or fail
-(`Eval` returns an error). Its Go code needs no bindings: the view calls it
+as menus, dialogs and the other native APIs. It has no page: `Page()` is
+nil, and it ignores `URL` and `WindowOptions.Page`. Its Go code needs no
+bindings: the view calls it
 directly. `CapturePage` returns a PNG of what it shows.
 
 On Linux, an app whose windows all show native UI needs GTK 3 alone, not

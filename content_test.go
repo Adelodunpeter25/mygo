@@ -50,7 +50,11 @@ func TestContentDrawsAndHandlesInput(t *testing.T) {
 		t.Errorf("%d clicks", clicks)
 	}
 
-	// The window has no page.
+	// The window has no page, which the page methods it keeps until they go
+	// report.
+	if w.Page() != nil {
+		t.Error("a window showing Content has a page")
+	}
 	if _, err := w.Eval("1"); !errors.Is(err, errNoPage) {
 		t.Errorf("Eval: %v", err)
 	}

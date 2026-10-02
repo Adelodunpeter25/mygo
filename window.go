@@ -920,6 +920,9 @@ func (w *Window) NativeHandle() uintptr { return get(w, platform.Window.Handle) 
 // SetFrontend). Besides http(s) URLs, schemes registered with
 // Protocol.Handle can be used.
 func (w *Window) LoadURL(rawURL string) error {
+	if w.content != nil {
+		return errNoPage
+	}
 	resolved, err := resolveURL(rawURL)
 	if err != nil {
 		return err
@@ -932,6 +935,9 @@ func (w *Window) LoadURL(rawURL string) error {
 // working directory, then against the directory of the executable (and the
 // Resources directory of a macOS app bundle).
 func (w *Window) LoadFile(path string) error {
+	if w.content != nil {
+		return errNoPage
+	}
 	abs, err := resolveFile(path)
 	if err != nil {
 		return err

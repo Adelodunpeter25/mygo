@@ -54,9 +54,20 @@ func TestContentDrawsAndHandlesInput(t *testing.T) {
 	if _, err := w.Eval("1"); !errors.Is(err, errNoPage) {
 		t.Errorf("Eval: %v", err)
 	}
-	if err := w.LoadURL("https://example.com"); err != nil || w.URL() != "" {
+	if err := w.LoadURL("https://example.com"); !errors.Is(err, errNoPage) || w.URL() != "" {
 		t.Errorf("LoadURL: %v, URL %q", err, w.URL())
 	}
+	if err := w.LoadFile("index.html"); !errors.Is(err, errNoPage) {
+		t.Errorf("LoadFile: %v", err)
+	}
+	if _, err := w.PrintToPDF(PDFOptions{}); !errors.Is(err, errNoPage) {
+		t.Errorf("PrintToPDF: %v", err)
+	}
+	if _, err := w.FindInPage("x", FindOptions{}); !errors.Is(err, errNoPage) {
+		t.Errorf("FindInPage: %v", err)
+	}
+	w.StopFindInPage()
+	w.Reload()
 
 	data, err := w.CapturePage()
 	if err != nil {

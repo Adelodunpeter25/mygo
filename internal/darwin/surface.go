@@ -415,7 +415,8 @@ func registerSurfaceClass() {
 			dx, dy := msgFloat(ev, sel("scrollingDeltaX")), msgFloat(ev, sel("scrollingDeltaY"))
 			precise := sendBool(ev, "hasPreciseScrollingDeltas")
 			if !precise {
-				dx, dy = dx*16, dy*16
+				// A mouse wheel scrolls by lines: 40 DIPs, as in browsers.
+				dx, dy = dx*40, dy*40
 			}
 			s.send(platform.SurfaceEvent{Kind: platform.PointerScroll, X: x, Y: y, DX: -dx, DY: -dy, Precise: precise, Mods: eventMods(ev)})
 		}),

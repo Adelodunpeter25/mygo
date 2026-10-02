@@ -19,8 +19,10 @@ type Painter struct {
 
 func (rt *engine) paint(root *Element, w, h, scale float32) {
 	s := &rt.scene
-	theme := rt.c.theme
-	s.Reset(int(math.Ceil(float64(w*scale))), int(math.Ceil(float64(h*scale))), theme.Background.scene())
+	// The root paints the theme's background: frames start transparent, so
+	// that a transparent root shows what is behind the content, such as a
+	// window's vibrancy.
+	s.Reset(int(math.Ceil(float64(w*scale))), int(math.Ceil(float64(h*scale))), scene.Color{})
 	s.Scale = scale
 	s.MaskAtlas, s.ColorAtlas = rt.text.MaskAtlas, rt.text.ColorAtlas
 	p := &Painter{rt: rt, s: s, scale: scale, opacity: 1, clip: Rect{0, 0, w, h}}

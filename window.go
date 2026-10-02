@@ -134,7 +134,8 @@ type WindowOptions struct {
 	// page that follows the light or dark appearance.
 	BackgroundColor string
 	// Vibrancy puts a translucent, blurred material behind a transparent
-	// page (macOS and Windows 11), e.g. VibrancySidebar.
+	// page (macOS and Windows 11), e.g. VibrancySidebar, or behind native
+	// UI where it draws no background (macOS).
 	Vibrancy Vibrancy
 	// Opacity of the window between 0 and 1 (default 1).
 	Opacity float64

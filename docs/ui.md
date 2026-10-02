@@ -373,6 +373,19 @@ ui.Row(c).Height(max(bar.Height, 32)).Padding(0, bar.Right+12, 0, bar.Left+12).D
 })
 ```
 
+On macOS, a window's `Vibrancy` shows wherever its native UI draws no
+background. The root draws the theme's by default: make it transparent and
+give backgrounds to the parts that need one, as a sidebar beside opaque
+content does:
+
+```go
+c.Root().Background(ui.Transparent)
+ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
+	app.sidebar(c) // over the material
+	ui.Column(c).Grow(1).Background(c.Theme().Background).Children(func() { app.content(c) })
+})
+```
+
 On Linux, an app whose windows all show native UI needs GTK 3 alone, not
 WebKitGTK.
 

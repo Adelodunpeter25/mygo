@@ -218,6 +218,37 @@ func TestTitleBar(t *testing.T) {
 	}
 }
 
+// TestEmacsKeys checks the Control keys of macOS text fields.
+func TestEmacsKeys(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("only macOS text fields have them")
+	}
+	text := "one two\nthree"
+	tt := NewTester(func(c *Context) { TextArea(c, &text).AutoFocus().Fill() }, 300, 200)
+	tt.Key(Ctrl, KeyA) // the start of "three"
+	tt.Type(">")
+	if text != "one two\n>three" {
+		t.Fatalf("Control-A, then typing: %q", text)
+	}
+	tt.Key(Ctrl, KeyP) // up into "one two"
+	tt.Key(Ctrl, KeyE)
+	tt.Key(Ctrl, KeyK) // at the end, joins the next paragraph
+	if text != "one two>three" {
+		t.Fatalf("Control-P, -E, -K: %q", text)
+	}
+	tt.Key(Ctrl, KeyA)
+	tt.Key(Ctrl, KeyF)
+	tt.Key(Ctrl, KeyD)
+	if text != "oe two>three" {
+		t.Fatalf("Control-A, -F, -D: %q", text)
+	}
+	tt.Key(Ctrl, KeyK)
+	tt.Key(Ctrl, KeyH)
+	if text != "" {
+		t.Errorf("Control-K, -H: %q", text)
+	}
+}
+
 func TestListScrollsAndSelects(t *testing.T) {
 	d := &demo{}
 	tt := NewTester(d.view, 640, 600)

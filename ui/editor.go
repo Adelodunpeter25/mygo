@@ -109,6 +109,11 @@ func (ed *editor) wants(k keyEvent) bool {
 			return true
 		}
 	}
+	if m == Ctrl && runtime.GOOS == "darwin" {
+		if _, ok := emacsKeys[k.key]; ok || k.key == KeyA || k.key == KeyE || k.key == KeyK {
+			return true
+		}
+	}
 	// Printable keys type text, which comes as TextInput.
 	return m == 0 || m == Alt && runtime.GOOS == "darwin"
 }
@@ -239,10 +244,21 @@ func (ed *editor) vertical(lines int, extend bool) {
 	ed.move(ed.textIndex(ed.layout.IndexAt(ed.desiredX, target)), extend)
 }
 
+// emacsKeys are the Control keys of macOS text fields that act as other
+// keys, after Emacs.
+var emacsKeys = map[Key]Key{KeyB: KeyLeft, KeyF: KeyRight, KeyP: KeyUp, KeyN: KeyDown, KeyH: KeyBackspace, KeyD: KeyDelete}
+
 func (ed *editor) key(c *Context, st *state, k editEvent) {
 	shift := k.mods&Shift != 0
 	m := k.mods &^ Shift
 	mac := runtime.GOOS == "darwin"
+	if mac && m == Ctrl {
+		if to, ok := emacsKeys[k.key]; ok {
+			k.key, m = to, 0
+		} else if ed.emacsKey(k.key, shift) {
+			return
+		}
+	}
 	word := (!mac && m == Ctrl) || (mac && m == Alt)
 	b := ed.boundaries()
 	a, z := ed.selection()
@@ -365,6 +381,35 @@ func (ed *editor) key(c *Context, st *state, k editEvent) {
 	case KeyY:
 		ed.command(c, "redo")
 	}
+}
+
+// emacsKey performs Control-A, -E and -K of macOS text fields, which move
+// to the start and end of the paragraph and delete to its end, and reports
+// whether key was one of them.
+func (ed *editor) emacsKey(key Key, shift bool) bool {
+	start, end := ed.caret, ed.caret
+	for start > 0 && ed.text[start-1] != '\n' {
+		start--
+	}
+	for end < len(ed.text) && ed.text[end] != '\n' {
+		end++
+	}
+	switch key {
+	case KeyA:
+		ed.move(start, shift)
+	case KeyE:
+		ed.move(end, shift)
+	case KeyK:
+		if end == ed.caret && end < len(ed.text) {
+			end++ // at the end, join the next paragraph
+		}
+		ed.anchor = ed.caret
+		ed.deleteRange(ed.caret, end)
+	default:
+		return false
+	}
+	ed.hasDesired = false
+	return true
 }
 
 func (ed *editor) command(c *Context, name string) {

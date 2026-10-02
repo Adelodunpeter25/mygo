@@ -5,6 +5,11 @@ package darwin
 import (
 	"fmt"
 	"math"
+	"sync"
+	"unsafe"
+
+	"github.com/ebitengine/purego"
+	"github.com/ebitengine/purego/objc"
 )
 
 // The functions in this file drive native UI the way a user would, for the
@@ -75,6 +80,22 @@ func TestClick(handle uintptr, x, y float64) {
 		for _, typ := range []uint{1, 2} { // NSEventTypeLeftMouseDown, LeftMouseUp
 			ev := msgMouseEvent(class("NSEvent"), sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
 				typ, loc, 0, 0, number, 0, 0, 1, 1)
+			send(win, "sendEvent:", uintptr(ev))
+		}
+	})
+}
+
+// TestControlClick Control-clicks (x, y), in points from the top-left
+// corner of a window's content.
+func TestControlClick(handle uintptr, x, y float64) {
+	withPool(func() {
+		win := id(handle)
+		content := msgRect(send(win, "contentView"), sel("frame"))
+		loc := NSPoint{x, content.Size.Height - y}
+		number := sendInt(win, "windowNumber")
+		for _, typ := range []uint{1, 2} { // NSEventTypeLeftMouseDown, LeftMouseUp
+			ev := msgMouseEvent(class("NSEvent"), sel("mouseEventWithType:location:modifierFlags:timestamp:windowNumber:context:eventNumber:clickCount:pressure:"),
+				typ, loc, 1<<18, 0, number, 0, 0, 1, 1) // NSEventModifierFlagControl
 			send(win, "sendEvent:", uintptr(ev))
 		}
 	})
@@ -200,4 +221,97 @@ func TestFullScreenHidesToolbar(handle uintptr) bool {
 	}
 	options := send(delegate, "window:willUseFullScreenPresentationOptions:", uintptr(win), presentationFullScreen|presentationAutoHideMenuBar)
 	return options&presentationAutoHideToolbar != 0
+}
+
+var (
+	testInputOnce         sync.Once
+	msgSetMarkedText      func(obj id, sel objc.SEL, text id, selected, replacement nsRange)
+	msgInsertText         func(obj id, sel objc.SEL, text id, replacement nsRange)
+	tisCopyCurrentSource  uintptr
+	tisGetSourceProperty  uintptr
+	cfEqual               uintptr
+	tisPropertySourceType uintptr
+	tisTypeKeyboardLayout uintptr
+)
+
+func loadTestInput() {
+	testInputOnce.Do(func() {
+		purego.RegisterFunc(&msgSetMarkedText, msgSendAddr)
+		purego.RegisterFunc(&msgInsertText, msgSendAddr)
+		tisCopyCurrentSource, _ = purego.Dlsym(libCarbon, "TISCopyCurrentKeyboardInputSource")
+		tisGetSourceProperty, _ = purego.Dlsym(libCarbon, "TISGetInputSourceProperty")
+		cfEqual, _ = purego.Dlsym(libCF, "CFEqual")
+		for _, c := range []struct {
+			name string
+			to   *uintptr
+		}{{"kTISPropertyInputSourceType", &tisPropertySourceType}, {"kTISTypeKeyboardLayout", &tisTypeKeyboardLayout}} {
+			if p, err := purego.Dlsym(libCarbon, c.name); err == nil {
+				*c.to = **(**uintptr)(unsafe.Pointer(&p))
+			}
+		}
+	})
+}
+
+// keyboardLayoutSelected reports whether the input source is a keyboard
+// layout, which inserts what keys type, rather than an input method,
+// which composes it.
+func keyboardLayoutSelected() bool {
+	loadTestInput()
+	if tisCopyCurrentSource == 0 || tisGetSourceProperty == 0 || tisPropertySourceType == 0 || tisTypeKeyboardLayout == 0 {
+		return false
+	}
+	src, _, _ := purego.SyscallN(tisCopyCurrentSource)
+	if src == 0 {
+		return false
+	}
+	defer cfRelease(src)
+	typ, _, _ := purego.SyscallN(tisGetSourceProperty, src, tisPropertySourceType)
+	eq, _, _ := purego.SyscallN(cfEqual, typ, tisTypeKeyboardLayout)
+	return typ != 0 && byte(eq) != 0
+}
+
+// TestClickAndType clicks (x, y) in a window showing native UI and types
+// text there at once, before the window draws another frame, with key
+// events that go through the input method as a keyboard's do. It reports
+// false for a window showing a web page, and while the input source is an
+// input method, which would compose the keys rather than insert them.
+func TestClickAndType(handle uintptr, x, y float64, text string) bool {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil || !keyboardLayoutSelected() {
+		return false
+	}
+	TestClick(handle, x, y)
+	withPool(func() {
+		number := sendInt(w.win, "windowNumber")
+		for _, r := range text {
+			chars := nsString(string(r))
+			for _, typ := range []uint{10, 11} { // NSEventTypeKeyDown, KeyUp
+				ev := msgKeyEvent(class("NSEvent"), sel("keyEventWithType:location:modifierFlags:timestamp:windowNumber:context:characters:charactersIgnoringModifiers:isARepeat:keyCode:"),
+					typ, NSPoint{}, 0, 0, number, 0, chars, chars, false, 0)
+				send(w.win, "sendEvent:", uintptr(ev))
+			}
+		}
+	})
+	return true
+}
+
+// TestCompose does what an input method does to a window showing native
+// UI: it shows text as the composition, its caret at rune caret, or with
+// commit, inserts it. It reports false for a window showing a web page.
+func TestCompose(handle uintptr, text string, caret int, commit bool) bool {
+	w := theBackend.byNSWindow[id(handle)]
+	if w == nil || w.surface == nil {
+		return false
+	}
+	loadTestInput()
+	withPool(func() {
+		none := nsRange{Location: nsNotFound}
+		if commit {
+			msgInsertText(w.surface.view, sel("insertText:replacementRange:"), nsString(text), none)
+			return
+		}
+		caretAt := nsRange{Location: uint(utf16Len(string([]rune(text)[:caret])))}
+		msgSetMarkedText(w.surface.view, sel("setMarkedText:selectedRange:replacementRange:"), nsString(text), caretAt, none)
+	})
+	return true
 }

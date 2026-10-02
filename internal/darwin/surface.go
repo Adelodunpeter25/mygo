@@ -97,7 +97,7 @@ func (w *window) createSurface(content NSRect) {
 	if respondsTo(s.view, "displayLinkWithTarget:selector:") {
 		s.link = retain(send(s.view, "displayLinkWithTarget:selector:", uintptr(s.view), uintptr(sel("mygoTick:"))))
 		send(s.link, "setPaused:", 1)
-		send(s.link, "addToRunLoop:forMode:", uintptr(send(class("NSRunLoop"), "mainRunLoop")), uintptr(nsString("kCFRunLoopCommonModes")))
+		send(s.link, "addToRunLoop:forMode:", uintptr(send(class("NSRunLoop"), "mainRunLoop")), kCFRunLoopCommonModes)
 	}
 	w.surface = s
 	w.b.bySurface[s.view] = s

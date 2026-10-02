@@ -128,3 +128,33 @@ func TestContentTextInputTurnsOnIME(t *testing.T) {
 		t.Errorf("cursor %v over the input", c)
 	}
 }
+
+func TestContentMenuRoles(t *testing.T) {
+	name := "Ada"
+	view := func(c *ui.Context) {
+		ui.TextInput(c, &name).Absolute().Left(10).Top(10).Width(200)
+	}
+	w, fw, s := contentWindow(t, view)
+	onMain(func() {
+		s.Send(platform.SurfaceEvent{Kind: platform.PointerDown, X: 30, Y: 25})
+		s.Send(platform.SurfaceEvent{Kind: platform.PointerUp, X: 30, Y: 25})
+		s.Frame()
+		// The page roles find no page; the edit roles edit the input.
+		for _, role := range []MenuRole{RoleReload, RoleForceReload, RoleToggleDevTools, RoleZoomIn, RoleResetZoom} {
+			performRole(role, w)
+		}
+		performRole(RoleSelectAll, w)
+		s.Frame()
+		performRole(RoleCut, w)
+		s.Frame()
+	})
+	if fw.IsDevToolsOpened() || len(fw.Scripts()) != 0 {
+		t.Errorf("page roles reached the window: devtools %v, scripts %q", fw.IsDevToolsOpened(), fw.Scripts())
+	}
+	if name != "" {
+		t.Errorf("Select All and Cut left %q", name)
+	}
+	if text := Clipboard.ReadText(); text != "Ada" {
+		t.Errorf("the clipboard has %q", text)
+	}
+}

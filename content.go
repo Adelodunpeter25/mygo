@@ -134,6 +134,12 @@ func (h *windowHandler) SurfaceEvent(ev platform.SurfaceEvent) {
 	}
 }
 
+// contentCommand performs an edit command (an Edit menu role: "copy",
+// "paste", …) in the window's native UI. Main thread only.
+func (w *Window) contentCommand(cmd string) {
+	(&windowHandler{w}).SurfaceEvent(platform.SurfaceEvent{Kind: platform.SurfaceCommand, Text: cmd})
+}
+
 // detachContent tells the Content its window closed. Main thread only.
 func (w *Window) detachContent() {
 	if c := w.conn; c != nil {

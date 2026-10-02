@@ -14,6 +14,7 @@ import (
 
 	"github.com/ebitengine/purego"
 
+	"github.com/egoist/mygo/internal/cef"
 	"github.com/egoist/mygo/internal/platform"
 )
 
@@ -37,14 +38,21 @@ type window struct {
 	h    platform.WindowHandler
 	opts *platform.WindowOptions
 
-	win     ptr // GtkWindow
-	box     ptr // GtkBox holding the menu bar and the webview
-	web     ptr // WebKitWebView
-	ucm     ptr // WebKitUserContentManager
-	menubar ptr
-	accel   ptr
-	owner   int
-	ownMenu bool
+	win ptr // GtkWindow
+	box ptr // GtkBox holding the menu bar and the webview
+	web ptr // WebKitWebView
+	ucm ptr // WebKitUserContentManager
+	// With CEF (cef.go): the browser, in the host, an X11 window over area,
+	// the widget where the web view would be.
+	page     *cef.Browser
+	area     ptr
+	host     uint64
+	colormap uint64
+	edges    ptr // the GdkWindow of the resize edges of a window without decorations
+	menubar  ptr
+	accel    ptr
+	owner    int
+	ownMenu  bool
 	// autoHideMenu shows the menu bar only while its menus are open;
 	// altAlone is an Alt press no other key or click has joined.
 	autoHideMenu, altAlone bool
@@ -152,11 +160,18 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 	if w.hiddenTitleBar() {
 		w.newControls()
 	}
-	w.createWebView()
-	if w.controls != nil {
-		gtkContainerAdd(w.controls.overlay, w.web)
+	view := w.area
+	if b.cef {
+		w.createPage()
+		view = w.area
 	} else {
-		gtkBoxPackStart(w.box, w.web, true, true, 0)
+		w.createWebView()
+		view = w.web
+	}
+	if w.controls != nil {
+		gtkContainerAdd(w.controls.overlay, view)
+	} else {
+		gtkBoxPackStart(w.box, view, true, true, 0)
 	}
 	w.accel = gtkAccelGroupNew()
 	gtkWindowAddAccelGroup(w.win, w.accel)
@@ -174,8 +189,16 @@ func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler)
 	connect(w.win, "key-release-event", cbMenuKey, data)
 
 	b.windows[w.id] = w
-	b.byWebView[w.web] = w
+	if w.web != 0 {
+		b.byWebView[w.web] = w
+	}
 	gtkWidgetShowAll(w.box)
+	if b.cef {
+		if err := w.createBrowser(); err != nil {
+			gtkWidgetDestroy(w.win)
+			return nil, err
+		}
+	}
 	if o.FullScreen {
 		gtkWindowFullscreen(w.win)
 	} else if o.Maximized {
@@ -271,11 +294,15 @@ func (w *window) cleanup() {
 	}
 	w.closed = true
 	delete(w.b.windows, w.id)
-	delete(w.b.byWebView, w.web)
 	dropOwner(w.owner)
-	webkitUserContentManagerUnregisterHandler(w.ucm, cs("mygo"))
-	webkitUserContentManagerRemoveAllScripts(w.ucm)
-	gObjectUnref(w.ucm)
+	if w.page != nil {
+		w.closePage()
+	} else {
+		delete(w.b.byWebView, w.web)
+		webkitUserContentManagerUnregisterHandler(w.ucm, cs("mygo"))
+		webkitUserContentManagerRemoveAllScripts(w.ucm)
+		gObjectUnref(w.ucm)
+	}
 	if w.press.event != 0 {
 		gdkEventFree(w.press.event)
 		w.press.event = 0
@@ -283,8 +310,13 @@ func (w *window) cleanup() {
 	w.releaseCursor()
 }
 
-func (w *window) Handle() uintptr        { return w.win }
-func (w *window) WebViewHandle() uintptr { return w.web }
+func (w *window) Handle() uintptr { return w.win }
+func (w *window) WebViewHandle() uintptr {
+	if w.page != nil {
+		return w.page.WindowHandle()
+	}
+	return w.web
+}
 
 func (w *window) SetTitle(title string) { gtkWindowSetTitle(w.win, cs(title)) }
 func (w *window) Title() string         { return goStr(gtkWindowGetTitle(w.win)) }
@@ -354,6 +386,9 @@ func (w *window) SetResizable(v bool) {
 	gtkWindowSetResizable(w.win, v)
 	if w.controls != nil {
 		w.layoutControls() // with a maximize button or without
+	}
+	if w.edges != 0 {
+		w.layoutPage()
 	}
 }
 
@@ -493,6 +528,10 @@ func (w *window) Center() {
 }
 
 func (w *window) SetBackgroundColor(c platform.Color) {
+	if w.page != nil {
+		w.page.SetBackgroundColor(c)
+		return
+	}
 	webkitWebViewSetBackgroundColor(w.web, &gdkRGBA{float64(c.R) / 255, float64(c.G) / 255, float64(c.B) / 255, float64(c.A) / 255})
 }
 
@@ -505,6 +544,10 @@ func (w *window) SetContentProtection(bool) {}
 func (w *window) SetVibrancy(string)        {}
 
 func (w *window) StartDrag() {
+	if w.page != nil {
+		w.startDragCEF()
+		return
+	}
 	if !w.press.hasPressed {
 		return
 	}
@@ -539,12 +582,19 @@ var resizeEdges = [8]struct {
 func (w *window) resizeEdge(event ptr) int32 {
 	// GdkEventMotion and GdkEventButton: window 8, x 24, y 32.
 	if !w.undecorated() || w.state&(stateMaximized|stateFullscreen) != 0 ||
-		field[ptr](event, 8) != gtkWidgetGetWindow(w.web) || !gtkWindowGetResizable(w.win) {
+		field[ptr](event, 8) != w.pageWindow() || !gtkWindowGetResizable(w.win) {
 		return -1
 	}
 	x, y := field[float64](event, 24), field[float64](event, 32)
 	var page gdkRectangle
-	gtkWidgetGetAllocation(w.web, &page)
+	if w.page != nil {
+		gtkWidgetGetAllocation(w.area, &page)
+		var px, py int32
+		xl.translateCoords(w.area, w.win, 0, 0, &px, &py)
+		page.Y = py
+	} else {
+		gtkWidgetGetAllocation(w.web, &page)
+	}
 	width, height := float64(page.Width), float64(page.Height)
 	atTop := page.Y == 0 // no menu bar above the page
 	top, bottom := atTop && y < resizeInset, y >= height-resizeInset
@@ -593,7 +643,10 @@ func (w *window) showResizeCursor(edge int32) {
 	if edge < 0 && !c.on {
 		return
 	}
-	page := gtkWidgetGetWindow(w.web)
+	page := w.pageWindow()
+	if page == 0 {
+		return
+	}
 	current := gdkWindowGetCursor(page)
 	if edge < 0 {
 		if c.on && current == c.shown {
@@ -618,6 +671,15 @@ func (w *window) showResizeCursor(edge int32) {
 		}
 		c.edge, c.shown = edge, cursor
 	}
+}
+
+// pageWindow returns the GdkWindow of the page's pointer events: WebKit's,
+// or the resize edges over CEF's.
+func (w *window) pageWindow() ptr {
+	if w.page != nil {
+		return w.edges
+	}
+	return gtkWidgetGetWindow(w.web)
 }
 
 // releaseCursor forgets the page's cursor kept to restore.
@@ -649,16 +711,27 @@ func (w *window) TitleBarDoubleClicked() {
 
 func (w *window) Close() {
 	if !w.closed {
+		if w.page != nil {
+			w.detachPage()
+		}
 		gtkWidgetDestroy(w.win)
 	}
 }
 
 func (w *window) LoadURL(url string) {
+	if w.page != nil {
+		w.page.LoadURL(url)
+		return
+	}
 	w.programmatic = true
 	webkitWebViewLoadURI(w.web, cs(url))
 }
 
 func (w *window) LoadHTML(html, baseURL string) {
+	if w.page != nil {
+		w.page.LoadHTML(html, baseURL)
+		return
+	}
 	w.programmatic = true
 	webkitWebViewLoadHTML(w.web, cs(html), optCS(baseURL))
 }
@@ -671,6 +744,10 @@ func (w *window) LoadFile(path, _ string) {
 }
 
 func (w *window) Reload(ignoreCache bool) {
+	if w.page != nil {
+		w.page.Reload(ignoreCache)
+		return
+	}
 	if ignoreCache {
 		webkitWebViewReloadBypassCache(w.web)
 	} else {
@@ -678,15 +755,73 @@ func (w *window) Reload(ignoreCache bool) {
 	}
 }
 
-func (w *window) StopLoading()       { webkitWebViewStopLoading(w.web) }
-func (w *window) GoBack()            { webkitWebViewGoBack(w.web) }
-func (w *window) GoForward()         { webkitWebViewGoForward(w.web) }
-func (w *window) CanGoBack() bool    { return webkitWebViewCanGoBack(w.web) }
-func (w *window) CanGoForward() bool { return webkitWebViewCanGoForward(w.web) }
-func (w *window) URL() string        { return goStr(webkitWebViewGetURI(w.web)) }
-func (w *window) IsLoading() bool    { return webkitWebViewIsLoading(w.web) }
+func (w *window) StopLoading() {
+	if w.page != nil {
+		w.page.StopLoading()
+		return
+	}
+	webkitWebViewStopLoading(w.web)
+}
+
+func (w *window) GoBack() {
+	if w.page != nil {
+		w.page.GoBack()
+		return
+	}
+	webkitWebViewGoBack(w.web)
+}
+
+func (w *window) GoForward() {
+	if w.page != nil {
+		w.page.GoForward()
+		return
+	}
+	webkitWebViewGoForward(w.web)
+}
+
+func (w *window) CanGoBack() bool {
+	if w.page != nil {
+		return w.page.CanGoBack()
+	}
+	return webkitWebViewCanGoBack(w.web)
+}
+
+func (w *window) CanGoForward() bool {
+	if w.page != nil {
+		return w.page.CanGoForward()
+	}
+	return webkitWebViewCanGoForward(w.web)
+}
+
+func (w *window) URL() string {
+	if w.page != nil {
+		return w.page.URL()
+	}
+	return goStr(webkitWebViewGetURI(w.web))
+}
+
+func (w *window) IsLoading() bool {
+	if w.page != nil {
+		return w.page.IsLoading()
+	}
+	return webkitWebViewIsLoading(w.web)
+}
+
+// PostMessages implements platform.MessagePoster: CEF pages take the
+// messages as data.
+func (w *window) PostMessages(msgs []byte) bool {
+	if w.page == nil {
+		return false
+	}
+	w.page.PostMessages(msgs)
+	return true
+}
 
 func (w *window) Eval(js string) {
+	if w.page != nil {
+		w.page.Eval(js)
+		return
+	}
 	if webkitWebViewEvaluateJavascript != nil {
 		// With its length, the script needs no NUL terminated copy.
 		webkitWebViewEvaluateJavascript(w.web, unsafe.StringData(js), len(js), nil, nil, 0, 0, 0)
@@ -696,6 +831,10 @@ func (w *window) Eval(js string) {
 }
 
 func (w *window) CallAsyncFunction(body string, cb func(string, error)) {
+	if w.page != nil {
+		w.page.CallAsyncFunction(body, cb)
+		return
+	}
 	if webkitWebViewCallAsyncJavascriptFunction == nil {
 		cb("", errors.New("mygo: Eval requires WebKitGTK 2.40 or later"))
 		return
@@ -714,30 +853,66 @@ func (w *window) CallAsyncFunction(body string, cb func(string, error)) {
 	webkitWebViewCallAsyncJavascriptFunction(w.web, unsafe.StringData(body), len(body), 0, nil, nil, 0, cbAsyncReady, id)
 }
 
-func (w *window) SetZoom(f float64) { webkitWebViewSetZoomLevel(w.web, f) }
-func (w *window) Zoom() float64     { return webkitWebViewGetZoomLevel(w.web) }
+func (w *window) SetZoom(f float64) {
+	if w.page != nil {
+		w.page.SetZoom(f)
+		return
+	}
+	webkitWebViewSetZoomLevel(w.web, f)
+}
+
+func (w *window) Zoom() float64 {
+	if w.page != nil {
+		return w.page.Zoom()
+	}
+	return webkitWebViewGetZoomLevel(w.web)
+}
 
 func (w *window) SetUserAgent(ua string) {
+	if w.page != nil {
+		w.page.SetUserAgent(ua)
+		return
+	}
 	webkitSettingsSetUserAgent(webkitWebViewGetSettings(w.web), optCS(ua))
 }
 
 func (w *window) UserAgent() string {
+	if w.page != nil {
+		return w.page.UserAgent()
+	}
 	return goStr(webkitSettingsGetUserAgent(webkitWebViewGetSettings(w.web)))
 }
 
 func (w *window) OpenDevTools() {
+	if w.page != nil {
+		w.page.OpenDevTools()
+		return
+	}
 	if w.opts.DevTools {
 		webkitWebInspectorShow(webkitWebViewGetInspector(w.web))
 	}
 }
 
-func (w *window) CloseDevTools() { webkitWebInspectorClose(webkitWebViewGetInspector(w.web)) }
+func (w *window) CloseDevTools() {
+	if w.page != nil {
+		w.page.CloseDevTools()
+		return
+	}
+	webkitWebInspectorClose(webkitWebViewGetInspector(w.web))
+}
 
 func (w *window) IsDevToolsOpened() bool {
+	if w.page != nil {
+		return w.page.IsDevToolsOpened()
+	}
 	return webkitWebInspectorGetWebView(webkitWebViewGetInspector(w.web)) != 0
 }
 
 func (w *window) CapturePage(cb func([]byte, error)) {
+	if w.page != nil {
+		w.page.CapturePage(cb)
+		return
+	}
 	id := pending.add(func(source, res ptr) {
 		var gerr ptr
 		surface := webkitWebViewGetSnapshotFinish(source, res, &gerr)
@@ -787,6 +962,10 @@ type printJob struct {
 // PrintToPDF prints to the "Print to File" printer of GTK, which writes
 // the PDF to a temporary file.
 func (w *window) PrintToPDF(o platform.PDFOptions, cb func([]byte, error)) {
+	if w.page != nil {
+		w.page.PrintToPDF(o, cb)
+		return
+	}
 	f, err := os.CreateTemp("", "mygo-*.pdf")
 	if err != nil {
 		cb(nil, err)
@@ -843,6 +1022,10 @@ func (w *window) PrintToPDF(o platform.PDFOptions, cb func([]byte, error)) {
 }
 
 func (w *window) Print() {
+	if w.page != nil {
+		w.page.Print()
+		return
+	}
 	op := webkitPrintOperationNew(w.web)
 	webkitPrintOperationRunDialog(op, w.win)
 	gObjectUnref(op)
@@ -919,6 +1102,9 @@ func initWindowCallbacks() {
 	})
 	cbFocusIn = purego.NewCallback(func(widget, event, data ptr) bool {
 		if w := b().window(data); w != nil {
+			if w.page != nil {
+				w.page.SetFocus(true) // the page takes the keyboard
+			}
 			w.h.Focused()
 		}
 		return false
@@ -975,6 +1161,10 @@ func initWindowCallbacks() {
 				w.requested, w.placing = nil, false
 			}
 		}
+		if w.page != nil && moved {
+			// Closes the page's popups; CEF does it when the page resizes.
+			w.page.Moved()
+		}
 		if resized {
 			w.h.Resized()
 		}
@@ -991,6 +1181,9 @@ func initWindowCallbacks() {
 		// GdkEventWindowState: changed_mask at 20, new_window_state at 24.
 		changed, state := field[uint32](event, 20), field[uint32](event, 24)
 		w.state = state
+		if w.edges != 0 {
+			w.layoutPage() // no resize edges while maximized
+		}
 		if changed&stateIconified != 0 {
 			if state&stateIconified != 0 {
 				w.h.Minimized()
@@ -1020,6 +1213,9 @@ func initWindowCallbacks() {
 	cbControlsAllocated = purego.NewCallback(func(widget, allocation, data ptr) {
 		if w := b().window(data); w != nil && w.controls != nil {
 			w.measureControls()
+			if w.page != nil {
+				w.layoutPage() // the buttons are out of the page's window
+			}
 		}
 	})
 	// The desktop's button layout changed: every window's title buttons

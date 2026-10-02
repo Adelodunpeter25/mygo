@@ -271,6 +271,10 @@ type Window struct {
 	// OnEval, when set, receives the scripts passed to Eval instead of
 	// recording them.
 	OnEval func(js string)
+	// OnPostMessages, when set, makes the window take the core's messages
+	// as data (platform.MessagePoster): it receives them instead of a
+	// script.
+	OnPostMessages func(msgs []byte)
 }
 
 // Scripts returns the scripts passed to Eval.
@@ -415,6 +419,14 @@ func (w *Window) Eval(js string) {
 	w.mu.Lock()
 	w.scripts = append(w.scripts, js)
 	w.mu.Unlock()
+}
+
+func (w *Window) PostMessages(msgs []byte) bool {
+	if w.OnPostMessages == nil {
+		return false
+	}
+	w.OnPostMessages(msgs)
+	return true
 }
 
 func (w *Window) CallAsyncFunction(body string, cb func(string, error)) {

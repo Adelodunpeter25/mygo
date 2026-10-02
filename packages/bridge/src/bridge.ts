@@ -1,7 +1,7 @@
 // Entry point of the script MyGo injects at document start into every page.
 // The Go side wraps the bundle in a function that defines __MYGO_CONFIG__.
 import { find, stopFind } from "./find";
-import { createRuntime } from "./runtime";
+import { createRuntime, type Internal } from "./runtime";
 import type { BridgeConfig } from "./types";
 
 declare const __MYGO_CONFIG__: BridgeConfig;
@@ -21,6 +21,7 @@ const INTERACTIVE =
   const post = (m: string) => raw.post(__MYGO_CONFIG__.secret + m);
 
   const { runtime, internal } = createRuntime(__MYGO_CONFIG__, post);
+  raw.listen?.(internal.receive);
   Object.defineProperty(w, "mygo", { value: runtime, enumerable: true });
   Object.defineProperty(w, "__mygo", { value: Object.freeze({ ...internal, find, stopFind }) });
 
@@ -142,9 +143,27 @@ interface Transport {
   post(message: string): void;
   /** Posts File objects along with a message (WebView2). */
   postWithFiles?(message: string, files: FileList): void;
+  /** Has the engine deliver Go's messages, rather than Go run a script that
+   * passes them to __mygo.receive (CEF). */
+  listen?(receive: Internal["receive"]): void;
 }
 
 function transport(w: any): Transport | null {
+  // CEF: the helper defines __mygoPost in the main frame before any script
+  // runs; take it away from the page. Messages cross as UTF-8 JSON in
+  // ArrayBuffers both ways, which Chromium copies as they are:
+  // __mygoPost(buffer) posts one, __mygoPost(fn) has fn receive Go's.
+  const native = w.__mygoPost;
+  if (typeof native === "function") {
+    delete w.__mygoPost;
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    return {
+      post: (m) => native(encoder.encode(m).buffer),
+      listen: (receive) =>
+        native((data: ArrayBuffer) => receive(JSON.parse(decoder.decode(data)))),
+    };
+  }
   const handler = w.webkit?.messageHandlers?.mygo;
   if (handler) return { post: (m) => handler.postMessage(m) };
   const webview = w.chrome?.webview;

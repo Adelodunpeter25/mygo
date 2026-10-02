@@ -161,6 +161,9 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 		// A GUI app, not a console one.
 		ldflags += " -H=windowsgui"
 	}
+	if goos == "linux" && c.Linux.cef() != nil {
+		ldflags += cefFlag()
+	}
 	compile := func(arch, out string) error {
 		logf("building %s/%s", goos, arch)
 		if goos == "windows" {
@@ -256,6 +259,11 @@ func buildPlatform(c *Config, goos, goarch string, opts buildOptions) ([]string,
 		}
 		if err := copyResources(res, stage); err != nil {
 			return nil, err
+		}
+		if c.Linux.cef() != nil {
+			if err := bundleCEF(c, stage, goarch, false); err != nil {
+				return nil, err
+			}
 		}
 		artifacts = append(append(artifacts, exe), files...)
 	}

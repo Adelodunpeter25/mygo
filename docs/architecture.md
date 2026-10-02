@@ -18,8 +18,9 @@ before changing anything under `internal/`.
   trampolines) on macOS and Linux and through the `syscall` package on
   Windows, never through `import "C"`.
 - **The system webview.** WKWebView on macOS, WebKitGTK 4.1 (4.0 as a
-  fallback) on Linux, WebView2 on Windows (amd64 and arm64). No browser engine
-  is bundled. The bundled CEF option is planned but not implemented; on
+  fallback) on Linux, WebView2 on Windows (amd64 and arm64). Linux apps may
+  bundle Chromium instead, through CEF (`linux.cef`, see
+  [CEF on Linux](#cef-on-linux-internalcef)); no other engine is bundled. On
   unsupported platforms the `internal/unsupported` backend makes `App.Run`
   fail with a clear error while everything still compiles.
 - **Bun is dev tooling only.** It builds and tests the TypeScript bridge, and
@@ -53,6 +54,8 @@ before changing anything under `internal/`.
 │   ├── platform/       the contract every backend implements
 │   ├── darwin/         macOS: AppKit + WKWebView through the Objective-C runtime
 │   ├── linux/          Linux: GTK 3 + WebKitGTK through dlopen
+│   ├── cef/            Chromium (CEF) for Linux pages through its C API, and
+│                       the helper, the executable of Chromium's processes
 │   ├── windows/        Windows: Win32 + WebView2 through syscall and COM
 │   ├── unsupported/    stub for other platforms
 │   ├── fake/           in-memory backend for unit tests
@@ -279,6 +282,85 @@ purego gives three primitives, used everywhere:
   desktop bound no keys to. The activation token of an `Activated` signal
   becomes the display's startup notification id while the callback runs,
   so the window it shows or focuses may take the focus.
+
+### CEF on Linux (`internal/cef`)
+
+A Linux app built with [`linux.cef`](distribution.md#chromium-cef) renders
+its pages with the Chromium Embedded Framework instead of WebKitGTK. The CLI
+links the directory of CEF into the app (`-X internal/linux.cefDir`), and
+`MYGO_CEF_DIR` overrides it. Windows, menus, dialogs, title bars and trays
+stay GTK's; `window.page` (a `*cef.Browser`) takes the place of the web
+view, and each page method of the Linux window calls it when it is set.
+
+- **The C API without cgo.** `internal/cef/gen` writes the structures of
+  CEF's C API (`capi_gen.go`) from the headers of the pinned version, as of
+  its API version (`apiVersion`, experimental members left out), and
+  `TestLayout` checks their sizes and offsets against the headers with a C
+  compiler. `Load` `dlopen`s `libcef.so` and calls `cef_api_hash` first, as
+  CEF requires. Objects CEF calls back are structures of function pointers
+  in C memory, with a reference count CEF drives (`object.go`); each
+  function slot of a class (`newClass`) is one purego callback, made once,
+  which finds its Go object by `self`. CEF's rules on references apply: a
+  function releases the objects it is passed, so the code releases each
+  parameter it does not keep and adds a reference to what it passes or
+  returns. A slot left NULL answers 0, not CEF's C++ default (hence
+  `canDownload`).
+- **Processes.** Chromium's renderers, GPU process and utilities run the
+  helper (`internal/cef/helper`, `mygo-helper` next to `libcef.so`), which
+  the CLI compiles with the app's version of MyGo and `-tags
+  mygo_cef_helper`, without the browser side: 2.7 MB. A Go process always
+  has threads, which Chromium's zygote and Linux sandbox refuse, so child
+  processes start without either (`--no-zygote`, `--no-sandbox`), as
+  WebKitGTK's web processes run unsandboxed in MyGo.
+- **The message loop.** CEF starts before GTK, as cefclient does, with
+  GDK's X11 backend, and `cef_run_message_loop` runs GLib's main loop,
+  which dispatches GTK's events too. `Ready` comes once CEF's context is
+  initialized; `Quit` ends the loop once the browsers have closed (DevTools
+  windows too), or after 3 seconds. Nested loops (dialogs, popup menus,
+  `Step`) allow CEF's nestable tasks, so pages keep running
+  (`NestedLoop`).
+- **Signals.** libcef installs handlers of SIGHUP, SIGINT, SIGTERM and
+  SIGCHLD without `SA_ONSTACK`, which Go needs: a handler that runs on a
+  goroutine's small stack corrupts it. `signals.go` gives the shutdown
+  signals back to Go, which quits the app as without CEF, and adds
+  `SA_ONSTACK` to the other handlers, once CEF has started and as browsers
+  attach.
+- **Windows.** A browser is an X11 child window (CEF's Alloy style) of a
+  24-bit TrueColor window of MyGo's (Chromium draws wrong in the 32-bit
+  visuals GTK gives some windows), laid over an empty `GtkBox` where the
+  web view would be (`createPage`, `layoutPage`), so pages need X11:
+  XWayland on Wayland. The title buttons of a hidden title bar are cut out
+  of it with XShape, and frameless windows get an input-only GDK window
+  along their edges, which shows the resize cursors and starts the
+  resizes. Chromium has the keyboard while the page has the focus: it
+  hands MyGo each key before the page (`on_pre_key_event`), for the menu
+  accelerators and an auto-hidden menu bar. CEF closes a browser only once
+  its window gets the close request CEF sends it (`do_close` answering 0),
+  never when an ancestor window goes, and GTK destroys a window's X11
+  windows before it reports the destroy: closing a window first moves the
+  browser's window to the root window, hidden (`detachPage`).
+- **The bridge.** The browser passes a window's scripts, the bridge first,
+  in the extra info of its creation; the helper runs them as a frame's
+  JavaScript context is created, before the page's own scripts, and gives
+  the main frame `__mygoPost`, which the bridge takes for its transport.
+  Messages cross as UTF-8 JSON in ArrayBuffers both ways
+  (`platform.MessagePoster`), copied once into a process message, through
+  shared memory from 64 KiB: the bridge's receiver parses the core's
+  batches with `JSON.parse`. A script that calls `__mygo.receive`, as on
+  WebKit, would be compiled, which makes messages from 16 KB two to seven
+  times slower, and the renderer would keep what V8 makes of each script.
+- **App URLs.** Custom schemes are served as `http://<scheme>.localhost/`,
+  as on Windows: a scheme handler factory for `http` on that host, so
+  pages are secure contexts with a real origin. The browser maps URLs both
+  ways, so the core and the app only see `<scheme>://localhost/`.
+  `LoadHTML` without a base URL serves the HTML from
+  `http://mygo-blank.localhost/`, which the core sees as `about:blank`.
+- **DevTools protocol.** `CallAsyncFunction` (`Runtime.evaluate`, as a user
+  gesture), `CapturePage`, `PrintToPDF`, the user agent, the background
+  color and `ClearBrowsingData` go through `send_dev_tools_message`.
+- **Profiles.** Chromium lets one process use a profile directory: an
+  app's is `~/.config/<name>/CEF`, and an instance that finds it in use
+  takes `CEF-2`, `CEF-3`, and so on.
 
 ### Windows (`internal/windows`)
 
@@ -869,13 +951,14 @@ makes Cmd+C/V/Q work; other platforms get none unless the app sets one.
     show or failed to load, right after launch when there is no window, and
     at most 5 s after launch otherwise (`dev.go`). Nothing happens in
     production builds.
-  - *Blue-green reload.* A change (polling every 250 ms, debounced) rebuilds;
+  - *Reload.* A change (polling every 250 ms, debounced) rebuilds;
     when the executable, Info.plist and icon are unchanged nothing restarts.
-    Otherwise the new build is launched and only once it is ready is the old
-    one sent SIGTERM (quit sequence), then SIGKILL after 3 s. A build that
-    fails to compile, start or get ready within 20 s leaves the old one
-    running. A new instance takes over the single-instance lock, and the old
-    instance only removes the lock socket if it is still its own.
+    Otherwise the running build is sent SIGTERM (quit sequence), then
+    SIGKILL after 3 s, and the new one starts once it has exited: builds
+    never overlap, so the single-instance lock, the CEF profile (Chromium
+    allows one process per profile) and the app's files are free. A build
+    that fails to compile leaves the old one running; one that fails to
+    start or get ready within 20 s leaves none until the next change.
   - *Watching.* Exactly what the build reads, from `go list -deps` after
     every build: the directories of the compiled packages outside GOROOT and
     the module cache (so local `replace` modules too), embedded files,
@@ -1012,12 +1095,13 @@ profile).
 
 | suite | command | covers |
 |---|---|---|
-| core | `go test .` | lifecycle, quit, IPC, channels, events, Eval, protocol, frontend URLs and serving, menus, trust, single instance and its dev handover, dev ready signal (fake backend); `go test -run '^$' -bench .` measures the Go side of IPC and custom schemes |
+| core | `go test .` | lifecycle, quit, IPC, channels, events, Eval, protocol, frontend URLs and serving, menus, trust, single instance, dev ready signal (fake backend); `go test -run '^$' -bench .` measures the Go side of IPC and custom schemes |
 | generator | `go test ./internal/tsgen` | TS output, json/v2 rules, source lookup; type-checks the output with `tsc` when `bun install` was run |
 | CLI | `go test ./cmd/mygo` | config, Info.plist, icons, universal binaries, template, dev launch/ready/stop (the test binary plays the app), watcher and `go list` inputs, resources (platform directories, universal pairs, staging, conflicts, dev placement; builds for every OS), frontend embedding (compiles an app with the overlay), `.DS_Store` against a dmgbuild golden file, a real DMG (`hdiutil`); builds and tools are skipped with `-short` |
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
 | plugins | `go test ./plugins/...` | the fetch plugin against `httptest` servers, the WebSocket client against a test server (ordering, fragments, pings, closing handshakes) |
-| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open; on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
+| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open; on Windows too (a GitHub Actions `windows-latest` runner has WebView2), and on Linux with CEF given `MYGO_CEF_DIR` |
+| CEF structures | `CEF_LAYOUT_OUT=layout.c GOOS=linux go test -run TestLayout ./internal/cef` | writes a C file that checks the generated structures against CEF's headers; compile it for the target, e.g. `zig cc -target aarch64-linux-gnu -c -DCEF_API_VERSION=15400 -I <cef_binary_…> layout.c` |
 
 The XDG variables let the URL scheme test check that GLib opens the scheme
 with the handler it registered; without them it writes to temporary
@@ -1037,6 +1121,18 @@ docker run --rm -v "$PWD:/work" -w /work -e MYGO_E2E=1 \
   -e XDG_DATA_HOME=/tmp/xdg-data -e XDG_CONFIG_HOME=/tmp/xdg-config \
   <image with libwebkit2gtk-4.1-0, xvfb, dbus> \
   dbus-run-session -- xvfb-run -a ./e2e.test
+```
+
+The same tests run with CEF given a directory with CEF and the helper:
+`MYGO_CEF_OUT=<dir> go test -run TestCEFBundle ./cmd/mygo` makes `<dir>/cef`
+for the machine's architecture as `mygo build` does, downloading CEF into
+the cache the first time; CI runs the Linux GUI tests with it too. The
+image also needs Chromium's libraries (the Debian package's dependencies):
+
+```sh
+docker run --rm --init -v "$PWD:/work" -w /work -e MYGO_E2E=1 -e MYGO_CEF_DIR=/work/cef \
+  <image with Chromium's libraries, xvfb, dbus> \
+  xvfb-run -a dbus-run-session -- ./e2e.test
 ```
 
 `TestGlobalShortcutPortal` binds global shortcuts through the desktop portal
@@ -1153,5 +1249,5 @@ which npm allows only for packages that exist: the first release uses an
 | window position | honored | ignored by Wayland compositors | honored |
 | resize borders without a title bar | the window's own | the outer 5 px of the page | invisible, outside the window; along the top of a hidden title bar, a child window |
 | content protection, click-through | yes | ignored | yes |
-| custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost` | `http://<scheme>.localhost` (the page's `location`) |
+| custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost`; `http://<scheme>.localhost` with CEF (the page's `location`) | `http://<scheme>.localhost` (the page's `location`) |
 | window.open | keeps the opener | independent window | independent window |

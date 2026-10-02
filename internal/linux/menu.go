@@ -54,7 +54,11 @@ func initMenuCallbacks() {
 		id := int(data)
 		if cmd, ok := editCommands[itemRoles[id]]; ok {
 			for _, w := range b.windows {
-				if gtkWindowIsActive(w.win) {
+				switch {
+				case !gtkWindowIsActive(w.win):
+				case w.page != nil:
+					w.page.Edit(itemRoles[id])
+				default:
 					webkitWebViewExecuteEditingCommand(w.web, cs(cmd))
 				}
 			}
@@ -345,6 +349,16 @@ func (b *Backend) PopupMenu(m *platform.Menu, pw platform.Window, pos *platform.
 		return
 	}
 	event, anchor := w.press.event, gtkWidgetGetWindow(w.web)
+	if w.page != nil {
+		// The page is CEF's: no presses of GTK's, and the window's
+		// coordinates.
+		event, anchor = 0, gtkWidgetGetWindow(w.win)
+		if pos != nil {
+			var x, y int32
+			xl.translateCoords(w.area, w.win, int32(pos.X), int32(pos.Y), &x, &y)
+			pos = &platform.Point{X: int(x), Y: int(y)}
+		}
+	}
 	const northWest = 1 // GDK_GRAVITY_NORTH_WEST
 	switch {
 	case pos != nil && anchor != 0:
@@ -367,7 +381,7 @@ func (b *Backend) PopupMenu(m *platform.Menu, pw platform.Window, pos *platform.
 	connect(menu, "deactivate", cbMenuDeactivate, loop)
 	b.popups = append(b.popups, menu)
 	b.quitLoops = append(b.quitLoops, loop)
-	gMainLoopRun(loop)
+	b.nested(func() { gMainLoopRun(loop) })
 	b.quitLoops = b.quitLoops[:len(b.quitLoops)-1]
 	b.popups = b.popups[:len(b.popups)-1]
 	gMainLoopUnref(loop)

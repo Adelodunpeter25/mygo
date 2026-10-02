@@ -62,7 +62,7 @@ Read the [documentation](docs/README.md).
 ## Status
 
 MyGo is at v0.1: the system webview on macOS 12+, Linux and Windows 10+
-(x64 and arm64). v0.2 will add a bundled CEF option.
+(x64 and arm64), and on Linux, Chromium bundled through CEF as an option.
 
 ## License
 

@@ -1272,8 +1272,10 @@ func (w *Window) flush() {
 	js := make([]byte, 0, size)
 	// A script shaped like a.b(JSON) runs without being compiled: WebKit's
 	// JavaScriptCore parses the value as JSON unless the inspector is on,
-	// several times faster. Pages without the runtime only throw.
-	js = append(js, "__mygo.receive(["...)
+	// several times faster. Pages without the runtime only throw. Engines
+	// that compile every script take the JSON as data (MessagePoster).
+	const receive = "__mygo.receive("
+	js = append(js, receive+"["...)
 	for i, m := range msgs {
 		if i > 0 {
 			js = append(js, ',')
@@ -1281,6 +1283,9 @@ func (w *Window) flush() {
 		js = m.appendTo(js)
 	}
 	js = append(js, "])"...)
+	if p, ok := w.native.(platform.MessagePoster); ok && p.PostMessages(js[len(receive):len(js)-1]) {
+		return
+	}
 	// js is not used again, so the script can share its memory.
 	w.native.Eval(unsafe.String(unsafe.SliceData(js), len(js)))
 }

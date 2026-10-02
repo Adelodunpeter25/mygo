@@ -218,4 +218,20 @@ export interface LinuxConfig {
    * the app opens from the applications menu).
    */
   command?: string;
+  /**
+   * Bundles Chromium (the Chromium Embedded Framework) as the app's web engine
+   * in place of WebKitGTK: the same Chromium on every Linux system, for about
+   * 370 MB. `true` takes the defaults (default: false).
+   */
+  cef?: boolean | CEFConfig;
+}
+
+/** The Chromium a Linux app bundles (`linux.cef`). */
+export interface CEFConfig {
+  /**
+   * The languages of Chromium's own texts to ship (form validation messages,
+   * its context menu), such as `["en-US", "de"]`; Chromium shows en-US for
+   * others (default: all 55, 50 MB).
+   */
+  locales?: string[];
 }

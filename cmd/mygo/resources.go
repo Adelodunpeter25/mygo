@@ -522,7 +522,11 @@ func reservedNames(c *Config, goos string) []string {
 		return []string{c.executableName() + ".exe"}
 	}
 	name := slugify(c.executableName())
-	return []string{name, name + ".desktop", name + ".png", name + ".xml", installScriptName}
+	reserved := []string{name, name + ".desktop", name + ".png", name + ".xml", installScriptName}
+	if c.Linux.cef() != nil {
+		reserved = append(reserved, cefDirName)
+	}
+	return reserved
 }
 
 func hiddenName(name string) bool { return strings.HasPrefix(name, ".") }

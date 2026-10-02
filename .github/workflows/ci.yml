@@ -82,3 +82,31 @@ jobs:
           XDG_DATA_HOME: ${{ runner.temp }}/xdg-data
           XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config
         run: xvfb-run -a dbus-run-session -- go test ./internal/e2e
+      # The GUI tests again with Chromium (linux.cef), from the cache that
+      # the CLI downloads CEF into.
+      - name: Restore CEF
+        id: cef
+        if: runner.os == 'Linux'
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/mygo/cef-*
+          key: cef-${{ runner.arch }}-${{ hashFiles('cmd/mygo/cef.go') }}
+      - name: Bundle CEF
+        if: runner.os == 'Linux'
+        env:
+          MYGO_CEF_OUT: ${{ runner.temp }}
+        run: go test -count=1 -run '^TestCEFBundle$' ./cmd/mygo
+      - name: Save CEF
+        if: always() && runner.os == 'Linux' && steps.cef.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/mygo/cef-*
+          key: ${{ steps.cef.outputs.cache-primary-key }}
+      - name: GUI tests with CEF
+        if: runner.os == 'Linux'
+        env:
+          MYGO_E2E: 1
+          MYGO_CEF_DIR: ${{ runner.temp }}/cef
+          XDG_DATA_HOME: ${{ runner.temp }}/xdg-data
+          XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config
+        run: xvfb-run -a dbus-run-session -- go test -count=1 ./internal/e2e

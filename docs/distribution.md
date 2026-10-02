@@ -320,7 +320,8 @@ export default defineConfig({
 });
 ```
 
-The package depends on GTK 3 and WebKitGTK; `depends` adds more packages.
+The package depends on GTK 3 and WebKitGTK, or Chromium's libraries for an
+app that [bundles Chromium](#chromium-cef); `depends` adds more packages.
 `maintainer` defaults to the `author` of package.json, else the name of
 the app.
 `comment` describes the app in its desktop entry and package, and
@@ -361,14 +362,60 @@ sh install.sh --uninstall   # keeps the settings and data of the app
 ```
 
 Running it again installs the version it finds over the installed one.
-The app needs WebKitGTK, which `install.sh` does not install: when the
-system's library cache has none, it says so after installing, with the
-command that installs it on Debian, Ubuntu, Fedora, Arch and openSUSE.
+The app needs WebKitGTK, unless it [bundles Chromium](#chromium-cef),
+which `install.sh` does not install: when the system's library cache has
+none, it says so after installing, with the command that installs it on
+Debian, Ubuntu, Fedora, Arch and openSUSE.
 When the app updates itself, it registers the desktop entry and file types
 of the new version, so a version that adds URL schemes or file types gets
 them. The Debian package suits people who want the system's package manager to
 update the app; `install.sh` suits the others, and is the Linux install
 that updates itself.
+
+### Chromium (CEF)
+
+With `linux.cef`, the app bundles Chromium, through the
+[Chromium Embedded Framework](https://github.com/chromiumembedded/cef), and
+renders its pages with it instead of WebKitGTK: the same engine on every
+distribution, whatever WebKitGTK it has, if any, with Chromium's DevTools.
+
+```ts
+export default defineConfig({
+  linux: { cef: true },
+  // or with some of Chromium's languages:
+  // linux: { cef: { locales: ["en-US", "de"] } },
+});
+```
+
+`mygo build` downloads the minimal build of the CEF version that MyGo pins
+once per architecture (310 MB for amd64, 400 MB for arm64), checks its
+SHA-256, and keeps what apps run, without its debug information, in the
+user cache (`~/.cache/mygo` on Linux). The app gets it in a `cef` directory
+next to its executable, with `mygo-helper`, which runs Chromium's
+processes. That makes the app about 360 MB, and its archive and package
+150 MB. `locales` lists the languages of Chromium's own texts to ship, such
+as its form validation messages and context menu; all 55 take 50 MB, and
+Chromium shows the others in English. `mygo dev` runs the app with the
+same files.
+
+The package depends on Chromium's libraries, which desktops have, instead
+of WebKitGTK. Compared with WebKitGTK:
+
+- Pages need X11: on Wayland desktops the app runs on XWayland, as its
+  windows do.
+- Pages run outside Chromium's sandbox, as WebKitGTK's do in MyGo: load
+  content you trust.
+- The frontend's origin is `http://mygo.localhost`, and custom schemes are
+  served from `http://<scheme>.localhost/`, as on Windows. The app's own
+  APIs keep `<scheme>://localhost` URLs.
+- The title buttons of a hidden title bar show the window's background
+  around them rather than the page, and windows are never transparent.
+- Chromium lets one process use a profile: a second instance of an app
+  that allows several stores its data apart (`CEF-2` next to `CEF` in
+  `~/.config/<name>`).
+- CEF's builds play no H.264 or AAC; use VP9, AV1 or Opus.
+- The app takes more memory, for Chromium's GPU process and services:
+  about twice as much as with WebKitGTK at rest.
 
 ## URL schemes and file types
 

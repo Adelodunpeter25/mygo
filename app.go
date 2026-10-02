@@ -95,6 +95,7 @@ func (a *Application) Run() error {
 	b := backend()
 	if err := b.Init(appHandler{}, platform.AppOptions{
 		Name:             a.Name(),
+		Dev:              IsDev(),
 		ActivationPolicy: string(a.activationPolicy()),
 	}); err != nil {
 		return err

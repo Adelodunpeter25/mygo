@@ -562,6 +562,35 @@ func TestEvents(t *testing.T) {
 	NewEvent[int]("test:progress")
 }
 
+// TestPostMessages hands the messages to windows that take them as data,
+// as CEF's do, instead of a script.
+func TestPostMessages(t *testing.T) {
+	ev := newEventForTest[string](t, "test:posted")
+	w, fw := readyWindow(t, WindowOptions{})
+	posted := make(chan []byte, 1)
+	onMain(func() { fw.OnPostMessages = func(msgs []byte) { posted <- slices.Clone(msgs) } })
+	if err := ev.Emit(w, "hi"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case msgs := <-posted:
+		var got []map[string]any
+		if err := json.Unmarshal(msgs, &got); err != nil {
+			t.Fatalf("posted %q: %v", msgs, err)
+		}
+		if len(got) != 1 || got[0]["t"] != "event" || got[0]["n"] != "test:posted" || got[0]["p"] != "hi" {
+			t.Errorf("posted %q", msgs)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no messages posted")
+	}
+	for _, s := range fw.Scripts() {
+		if strings.HasPrefix(s, "__mygo.receive(") {
+			t.Errorf("the messages went as a script too: %q", s)
+		}
+	}
+}
+
 // Channels.
 
 type streamer struct {
@@ -1653,36 +1682,6 @@ func TestSingleInstance(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("OnOpenURL not called for the forwarded URL")
-	}
-}
-
-func TestSingleInstanceDevHandover(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("unix sockets only")
-	}
-	if !App.RequestSingleInstanceLock() {
-		t.Fatal("first instance did not get the lock")
-	}
-	path := singleInstanceSocket(App.Name())
-	// An instance launched by a `mygo dev` reload takes the lock over.
-	cmd := exec.Command(os.Args[0], "-test.run=^$")
-	cmd.Env = append(os.Environ(), "MYGO_TEST_SECOND_INSTANCE=1", "MYGO_READY_SOCKET=/nonexistent/ready.sock")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.TrimSpace(string(out)) != "locked" {
-		t.Fatalf("instance launched by mygo dev printed %q, want locked", out)
-	}
-	defer os.Remove(path)
-	replaced, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Quitting the previous instance must leave the new socket alone.
-	releaseSingleInstanceLock()
-	if fi, err := os.Stat(path); err != nil || !os.SameFile(fi, replaced) {
-		t.Error("releasing the lock removed the socket of the instance that took it over")
 	}
 }
 

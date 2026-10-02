@@ -36,10 +36,30 @@ type Linux struct {
 	// install.sh. Empty means none, and the app opens from the applications
 	// menu.
 	Command string `json:"command"`
+	// CEF bundles Chromium as the app's web engine in place of WebKitGTK:
+	// true, or an object of options (cef.go). The app then runs the same
+	// Chromium on every Linux system, at about 300 MB.
+	CEF *CEF `json:"cef"`
 }
 
 // commandRe matches the names linux.command may take.
 var commandRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*$`)
+
+// debDepends lists the packages a Linux app needs: GTK, and WebKitGTK or,
+// with CEF, the libraries libcef.so links (the t64 names are those of
+// Ubuntu 24.04 and later).
+func debDepends(c *Config) []string {
+	if c.Linux.cef() == nil {
+		return []string{"libgtk-3-0 | libgtk-3-0t64", "libwebkit2gtk-4.1-0"}
+	}
+	return []string{
+		"libgtk-3-0 | libgtk-3-0t64", "libglib2.0-0 | libglib2.0-0t64", "libnss3", "libnspr4",
+		"libatk1.0-0 | libatk1.0-0t64", "libatk-bridge2.0-0 | libatk-bridge2.0-0t64", "libatspi2.0-0 | libatspi2.0-0t64",
+		"libcups2 | libcups2t64", "libasound2 | libasound2t64", "libdbus-1-3", "libexpat1", "libgbm1", "libudev1",
+		"libcairo2", "libpango-1.0-0", "libx11-6", "libxcb1", "libxcomposite1", "libxdamage1", "libxext6",
+		"libxfixes3", "libxkbcommon0", "libxrandr2",
+	}
+}
 
 // debArch maps GOARCH to Debian architectures.
 var debArch = map[string]string{"amd64": "amd64", "arm64": "arm64", "386": "i386", "arm": "armhf", "riscv64": "riscv64"}
@@ -151,7 +171,7 @@ func writeDeb(c *Config, stage, name, goarch string, app []string) (string, erro
 		}
 	}
 
-	depends := append([]string{"libgtk-3-0 | libgtk-3-0t64", "libwebkit2gtk-4.1-0"}, c.Linux.Depends...)
+	depends := append(debDepends(c), c.Linux.Depends...)
 	description := c.Linux.Comment
 	if description == "" {
 		description = c.Name

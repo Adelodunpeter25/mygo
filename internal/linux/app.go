@@ -12,6 +12,7 @@ import (
 
 	"github.com/ebitengine/purego"
 
+	"github.com/egoist/mygo/internal/cef"
 	"github.com/egoist/mygo/internal/platform"
 )
 
@@ -44,6 +45,9 @@ type Backend struct {
 	// compositorDecorates reports a Wayland compositor that decorates
 	// windows itself, whose title bar shows no buttons of GTK's (titlebar.go).
 	compositorDecorates bool
+	// cef reports an app that bundles CEF (cef.go), cefReady that CEF can
+	// make browsers.
+	cef, cefReady bool
 
 	// What the launcher entry shows (Window.SetProgressBar, badges).
 	launcher struct {
@@ -85,15 +89,33 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	b.h = h
 	b.name = opts.Name
 	theBackend = b
-	if err := load(); err != nil {
+	dir := cefDirectory()
+	if dir != "" {
+		if err := b.loadCEF(dir); err != nil {
+			return err
+		}
+		b.cef = true
+	}
+	if err := load(!b.cef); err != nil {
 		return err
 	}
-	if os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
+	if b.cef {
+		bindCEF()
+		xl.setAllowedBackends("x11")
+		// CEF first, as cefclient does: Chromium sets GTK up its way, with
+		// the locale it chose.
+		if err := b.startCEF(dir, opts); err != nil {
+			return err
+		}
+	} else if os.Getenv("WEBKIT_DISABLE_DMABUF_RENDERER") == "" {
 		// Avoid blank windows on setups where WebKitGTK's DMA-BUF renderer
 		// fails (NVIDIA, VMs, containers).
 		_ = os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
 	}
 	if !gtkInitCheck(0, 0) {
+		if b.cef {
+			return errors.New("mygo: cannot open an X11 display, which CEF needs (is DISPLAY set? XWayland stands in for it on Wayland)")
+		}
 		return errors.New("mygo: cannot open display (is DISPLAY or WAYLAND_DISPLAY set?)")
 	}
 	var x11Type func() uintptr
@@ -107,13 +129,27 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 		gTypeCheckInstanceIsA(gdkDisplayGetDefault(), waylandType()) &&
 		bind(libGDK, &prefersSSD, "gdk_wayland_display_prefers_ssd") && prefersSSD(gdkDisplayGetDefault())
 	initCallbacks()
+	if b.cef {
+		if !loadX11() {
+			return errors.New("mygo: CEF needs an X11 display")
+		}
+		xl.cefDisplay = ptr(cef.XDisplay())
+	}
 	return nil
 }
 
 func (b *Backend) Run() error {
 	b.running = true
-	gIdleAddFull(0, readyCallback, 0, 0)
-	gtkMain()
+	if b.cef {
+		// CEF runs GLib's main loop; Ready comes once it can make browsers.
+		if b.cefReady {
+			gIdleAddFull(0, readyCallback, 0, 0)
+		}
+		cef.Run()
+	} else {
+		gIdleAddFull(0, readyCallback, 0, 0)
+		gtkMain()
+	}
 	b.running = false
 	return nil
 }
@@ -131,7 +167,11 @@ func (b *Backend) Quit() {
 	for _, l := range b.quitLoops {
 		gMainLoopQuit(l)
 	}
-	if b.running {
+	switch {
+	case !b.running:
+	case b.cef:
+		cef.Quit()
+	default:
 		gtkMainQuit()
 	}
 }
@@ -147,10 +187,15 @@ type modal struct {
 func (b *Backend) runDialog(d ptr, native bool) int32 {
 	b.modals = append(b.modals, modal{d, native})
 	defer func() { b.modals = b.modals[:len(b.modals)-1] }()
-	if native {
-		return gtkNativeDialogRun(d)
-	}
-	return gtkDialogRun(d)
+	var r int32
+	b.nested(func() {
+		if native {
+			r = gtkNativeDialogRun(d)
+		} else {
+			r = gtkDialogRun(d)
+		}
+	})
+	return r
 }
 
 func (b *Backend) Signal() {
@@ -160,7 +205,7 @@ func (b *Backend) Signal() {
 	gIdleAddFull(0, dispatchCallback, 0, 0)
 }
 
-func (b *Backend) Step() { gMainContextIteration(0, true) }
+func (b *Backend) Step() { b.nested(func() { gMainContextIteration(0, true) }) }
 
 func (b *Backend) Wake() {
 	if gMainContextWakeup != nil {
@@ -198,6 +243,7 @@ func initCallbacks() {
 		})
 		initWindowCallbacks()
 		initDownloadCallbacks()
+		initCEFCallbacks()
 		initMenuCallbacks()
 		initSystemCallbacks()
 	})
@@ -289,6 +335,10 @@ func (a appController) Locale() string {
 func (a appController) Package() (platform.PackageInfo, bool) { return platform.PackageInfo{}, false }
 
 func (a appController) ClearBrowsingData(done func(error)) {
+	if a.b.cef {
+		cef.ClearBrowsingData(done)
+		return
+	}
 	const all = 1<<14 - 1 // WEBKIT_WEBSITE_DATA_ALL
 	manager := webkitWebContextGetWebsiteDataManager(webkitWebContextGetDefault())
 	id := pending.add(func(source, res ptr) {

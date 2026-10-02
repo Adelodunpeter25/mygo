@@ -90,7 +90,7 @@ Apps run on:
 | Platform | Needs |
 |---|---|
 | macOS 12 or later | nothing: WKWebView is part of macOS |
-| Linux (x64, arm64) | GTK 3 and WebKitGTK 4.1 (or 4.0): `libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora. Tray icons also need `libayatana-appindicator3`. |
+| Linux (x64, arm64) | GTK 3 and WebKitGTK 4.1 (or 4.0): `libwebkit2gtk-4.1-0` on Debian and Ubuntu, `webkit2gtk4.1` on Fedora; or X11 (XWayland on Wayland) for apps that [bundle Chromium](distribution.md#chromium-cef). Tray icons also need `libayatana-appindicator3`. |
 | Windows 10 and 11 (x64, arm64) | the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/), which Windows 11 includes |
 
 `mygo doctor` checks a development machine.

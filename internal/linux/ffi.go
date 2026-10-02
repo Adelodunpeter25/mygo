@@ -489,7 +489,9 @@ var (
 
 var webkitVersion string
 
-func load() error {
+// load loads GTK and the libraries around it, and WebKitGTK unless the app
+// bundles CEF.
+func load(webkit bool) error {
 	var err error
 	if libGLib, err = open("libglib-2.0.so.0"); err != nil {
 		return err
@@ -504,15 +506,6 @@ func load() error {
 		return err
 	}
 	if libGTK, err = open("libgtk-3.so.0"); err != nil {
-		return err
-	}
-	if libWebKit, err = open("libwebkit2gtk-4.1.so.0", "libwebkit2gtk-4.0.so.37"); err != nil {
-		return fmt.Errorf("%w (install WebKitGTK: libwebkit2gtk-4.1-0 on Debian/Ubuntu, webkit2gtk4.1 on Fedora)", err)
-	}
-	if libJSC, err = open("libjavascriptcoregtk-4.1.so.0", "libjavascriptcoregtk-4.0.so.18"); err != nil {
-		return err
-	}
-	if libSoup, err = open("libsoup-3.0.so.0", "libsoup-2.4.so.1"); err != nil {
 		return err
 	}
 	if libCairo, err = open("libcairo.so.2"); err != nil {
@@ -764,6 +757,51 @@ func load() error {
 	mustBind(t, &gtkAboutDialogSetCopyright, "gtk_about_dialog_set_copyright")
 	mustBind(t, &gtkAboutDialogSetComments, "gtk_about_dialog_set_comments")
 
+	mustBind(libCairo, &cairoSurfaceWriteToPNGStream, "cairo_surface_write_to_png_stream")
+	mustBind(libCairo, &cairoSurfaceDestroy, "cairo_surface_destroy")
+
+	mustBind(libGObject, &gTypeCheckInstanceIsA, "g_type_check_instance_is_a")
+	mustBind(t, &gtkPrintSettingsNew, "gtk_print_settings_new")
+	mustBind(t, &gtkPrintSettingsSet, "gtk_print_settings_set")
+	mustBind(t, &gtkPageSetupNew, "gtk_page_setup_new")
+	mustBind(t, &gtkPageSetupSetPaperSize, "gtk_page_setup_set_paper_size")
+	mustBind(t, &gtkPageSetupSetOrientation, "gtk_page_setup_set_orientation")
+	mustBind(t, &gtkPageSetupSetTopMargin, "gtk_page_setup_set_top_margin")
+	mustBind(t, &gtkPageSetupSetBottomMargin, "gtk_page_setup_set_bottom_margin")
+	mustBind(t, &gtkPageSetupSetLeftMargin, "gtk_page_setup_set_left_margin")
+	mustBind(t, &gtkPageSetupSetRightMargin, "gtk_page_setup_set_right_margin")
+	mustBind(t, &gtkPaperSizeNewCustom, "gtk_paper_size_new_custom")
+	mustBind(t, &gtkPaperSizeFree, "gtk_paper_size_free")
+	if webkit {
+		if err := loadWebKit(); err != nil {
+			return err
+		}
+	}
+
+	if libIndicator != 0 {
+		bind(libIndicator, &appIndicatorNew, "app_indicator_new")
+		bind(libIndicator, &appIndicatorSetStatus, "app_indicator_set_status")
+		bind(libIndicator, &appIndicatorSetMenu, "app_indicator_set_menu")
+		bind(libIndicator, &appIndicatorSetIconFull, "app_indicator_set_icon_full")
+		bind(libIndicator, &appIndicatorSetIconThemePath, "app_indicator_set_icon_theme_path")
+		bind(libIndicator, &appIndicatorSetTitle, "app_indicator_set_title")
+		bind(libIndicator, &appIndicatorSetLabel, "app_indicator_set_label")
+	}
+	return nil
+}
+
+// loadWebKit loads WebKitGTK, the web view of apps that do not bundle CEF.
+func loadWebKit() error {
+	var err error
+	if libWebKit, err = open("libwebkit2gtk-4.1.so.0", "libwebkit2gtk-4.0.so.37"); err != nil {
+		return fmt.Errorf("%w (install WebKitGTK: libwebkit2gtk-4.1-0 on Debian/Ubuntu, webkit2gtk4.1 on Fedora)", err)
+	}
+	if libJSC, err = open("libjavascriptcoregtk-4.1.so.0", "libjavascriptcoregtk-4.0.so.18"); err != nil {
+		return err
+	}
+	if libSoup, err = open("libsoup-3.0.so.0", "libsoup-2.4.so.1"); err != nil {
+		return err
+	}
 	w := libWebKit
 	mustBind(w, &webkitWebContextGetDefault, "webkit_web_context_get_default")
 	mustBind(w, &webkitWebContextRegisterURIScheme, "webkit_web_context_register_uri_scheme")
@@ -837,18 +875,6 @@ func load() error {
 	mustBind(w, &webkitUserMediaPermissionIsForVideoDevice, "webkit_user_media_permission_is_for_video_device")
 	mustBind(w, &webkitPermissionRequestAllow, "webkit_permission_request_allow")
 	mustBind(w, &webkitPermissionRequestDeny, "webkit_permission_request_deny")
-	mustBind(libGObject, &gTypeCheckInstanceIsA, "g_type_check_instance_is_a")
-	mustBind(t, &gtkPrintSettingsNew, "gtk_print_settings_new")
-	mustBind(t, &gtkPrintSettingsSet, "gtk_print_settings_set")
-	mustBind(t, &gtkPageSetupNew, "gtk_page_setup_new")
-	mustBind(t, &gtkPageSetupSetPaperSize, "gtk_page_setup_set_paper_size")
-	mustBind(t, &gtkPageSetupSetOrientation, "gtk_page_setup_set_orientation")
-	mustBind(t, &gtkPageSetupSetTopMargin, "gtk_page_setup_set_top_margin")
-	mustBind(t, &gtkPageSetupSetBottomMargin, "gtk_page_setup_set_bottom_margin")
-	mustBind(t, &gtkPageSetupSetLeftMargin, "gtk_page_setup_set_left_margin")
-	mustBind(t, &gtkPageSetupSetRightMargin, "gtk_page_setup_set_right_margin")
-	mustBind(t, &gtkPaperSizeNewCustom, "gtk_paper_size_new_custom")
-	mustBind(t, &gtkPaperSizeFree, "gtk_paper_size_free")
 	mustBind(w, &webkitJavascriptResultGetJSValue, "webkit_javascript_result_get_js_value")
 	mustBind(w, &webkitNavigationPolicyDecisionGetNavigationAction, "webkit_navigation_policy_decision_get_navigation_action")
 	bind(w, &webkitNavigationPolicyDecisionGetFrameName, "webkit_navigation_policy_decision_get_frame_name")
@@ -876,18 +902,6 @@ func load() error {
 	mustBind(libSoup, &soupMessageHeadersGetOne, "soup_message_headers_get_one")
 	mustBind(libSoup, &soupMessageHeadersAppend, "soup_message_headers_append")
 	mustBind(libSoup, &soupMessageHeadersForeach, "soup_message_headers_foreach")
-	mustBind(libCairo, &cairoSurfaceWriteToPNGStream, "cairo_surface_write_to_png_stream")
-	mustBind(libCairo, &cairoSurfaceDestroy, "cairo_surface_destroy")
-
-	if libIndicator != 0 {
-		bind(libIndicator, &appIndicatorNew, "app_indicator_new")
-		bind(libIndicator, &appIndicatorSetStatus, "app_indicator_set_status")
-		bind(libIndicator, &appIndicatorSetMenu, "app_indicator_set_menu")
-		bind(libIndicator, &appIndicatorSetIconFull, "app_indicator_set_icon_full")
-		bind(libIndicator, &appIndicatorSetIconThemePath, "app_indicator_set_icon_theme_path")
-		bind(libIndicator, &appIndicatorSetTitle, "app_indicator_set_title")
-		bind(libIndicator, &appIndicatorSetLabel, "app_indicator_set_label")
-	}
 	return nil
 }
 

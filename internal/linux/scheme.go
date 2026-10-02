@@ -14,6 +14,7 @@ import (
 
 	"github.com/ebitengine/purego"
 
+	"github.com/egoist/mygo/internal/cef"
 	"github.com/egoist/mygo/internal/platform"
 )
 
@@ -37,6 +38,10 @@ func (b *Backend) registerScheme(scheme string) {
 		return
 	}
 	b.schemes[scheme] = true
+	if b.cef {
+		cef.RegisterScheme(scheme)
+		return
+	}
 	ctx := webkitWebContextGetDefault()
 	webkitWebContextRegisterURIScheme(ctx, cs(scheme), cbScheme, 0, 0)
 	sec := webkitWebContextGetSecurityManager(ctx)

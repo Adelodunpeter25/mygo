@@ -43,6 +43,10 @@ func installScript(c *Config) string {
 		"Releases":  "",
 		"API":       "",
 		"TagPrefix": "",
+		"CEF":       "",
+	}
+	if c.Linux.cef() != nil {
+		data["CEF"] = "1" // Chromium comes with the app
 	}
 	switch u := c.Updates; {
 	case u != nil && u.tagged():
@@ -239,10 +243,12 @@ main() {
 	else
 		echo "Installed $app_name: open it from the applications menu"
 	fi
+{{- if not .CEF}}
 	if ! has_webkit; then
 		echo "$app_name needs WebKitGTK, which is not installed. Install it with:" >&2
 		echo "  $(webkit_install_command)" >&2
 	fi
+{{- end}}
 }
 
 # latest_tag prints the tag of the newest release tagged $tag_prefix that is

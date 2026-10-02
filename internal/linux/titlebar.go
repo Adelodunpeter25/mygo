@@ -155,6 +155,9 @@ func (w *window) fullScreenChanged() {
 			gtkWidgetSetVisible(bar, w.state&stateFullscreen == 0)
 		}
 	}
+	if w.page != nil {
+		w.layoutPage()
+	}
 	w.h.TitleBarChanged()
 }
 

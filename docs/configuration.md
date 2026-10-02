@@ -124,8 +124,9 @@ See [Windows](distribution.md#windows).
 | `maintainer` | `author` in package.json, else `name` | `Name <email>`, the maintainer of the Debian package |
 | `comment` | | a short description, for the desktop entry and the package |
 | `categories` | `["Utility"]` | the categories of the desktop entry, which place it in application menus |
-| `depends` | | Debian packages the app needs besides GTK and WebKitGTK |
+| `depends` | | Debian packages the app needs besides GTK and its web engine |
 | `command` | none | a command that runs the app: `/usr/bin/<command>` from the Debian package, `~/.local/bin/<command>` from install.sh |
+| `cef` | `false` | bundles Chromium, which renders the pages instead of WebKitGTK: `true`, or `{ locales: ["en-US", "de"] }` to ship some of Chromium's languages, all by default. See [Chromium](distribution.md#chromium-cef) |
 
 See [Linux](distribution.md#linux).
 

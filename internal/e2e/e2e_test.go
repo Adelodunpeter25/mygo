@@ -333,8 +333,7 @@ func TestPopupMenu(t *testing.T) {
 		t.Errorf("popup without a window: %d menus shown", n)
 	}
 	w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200})
-	w.LoadHTML("<p>menu</p>", "")
-	waitFor(t, w, "document.readyState === 'complete'")
+	loadHTML(t, w, "<p>menu</p>")
 	if n := popup(func() { menu.PopupAt(w, 20, 20) }); n != 1 {
 		t.Errorf("PopupAt: %d menus shown", n)
 	}
@@ -359,6 +358,20 @@ func TestEarlyWindow(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("the window requested before Run was not created")
 	}
+}
+
+// httpSchemes reports an engine that serves custom schemes from
+// http://<scheme>.localhost/: WebView2, and CEF on Linux (MYGO_CEF_DIR
+// runs the tests with it).
+func httpSchemes() bool { return runtime.GOOS == "windows" || os.Getenv("MYGO_CEF_DIR") != "" }
+
+// loadHTML loads html in w and waits until the page has loaded it: until
+// the new document commits, the window has the previous one, such as its
+// first, about:blank, which is complete too.
+func loadHTML(t *testing.T, w *mygo.Window, html string) {
+	t.Helper()
+	w.LoadHTML(html+`<i id="e2e-loaded" hidden></i>`, "")
+	waitFor(t, w, "document.readyState === 'complete' && document.getElementById('e2e-loaded') !== null")
 }
 
 // waitFor polls the page until expr is truthy.
@@ -463,8 +476,7 @@ func TestChannels(t *testing.T) {
 
 func TestEvalForms(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Hidden: true})
-	w.LoadHTML("<p>eval</p>", "")
-	waitFor(t, w, "document.readyState === 'complete'")
+	loadHTML(t, w, "<p>eval</p>")
 	cases := []struct{ code, want string }{
 		{"1 + 1", "2"},
 		{"document.querySelector('p').textContent;", "eval"},
@@ -487,8 +499,7 @@ func TestEvalForms(t *testing.T) {
 func TestVibrancy(t *testing.T) {
 	for _, material := range []mygo.Vibrancy{mygo.VibrancySidebar, mygo.VibrancyMica, "no-such-material"} {
 		w := newWindow(t, mygo.WindowOptions{Width: 300, Height: 200, Vibrancy: material, Transparent: true})
-		w.LoadHTML("<p>vibrancy</p>", "")
-		waitFor(t, w, "document.readyState === 'complete'")
+		loadHTML(t, w, "<p>vibrancy</p>")
 		if attached, ok := webViewAttached(w); ok && !attached {
 			t.Errorf("vibrancy %q: the page is not in the window", material)
 		}
@@ -543,8 +554,7 @@ func TestFramelessResizeEdges(t *testing.T) {
 	if _, ok := resizeCursor(w); !ok {
 		t.Skip("frameless windows keep native resize borders on this platform")
 	}
-	w.LoadHTML(`<body style="margin:0;height:100vh" onmousedown="window.pressed=(window.pressed||0)+1"></body>`, "")
-	waitFor(t, w, "document.readyState === 'complete'")
+	loadHTML(t, w, `<body style="margin:0;height:100vh" onmousedown="window.pressed=(window.pressed||0)+1"></body>`)
 	cursor := func(want string) {
 		t.Helper()
 		eventually(t, fmt.Sprintf("the cursor %q", want), func() bool { c, _ := resizeCursor(w); return c == want })
@@ -578,6 +588,11 @@ func TestFramelessResizeEdges(t *testing.T) {
 
 	// Elsewhere the page gets the mouse and shows its own cursor; it saw
 	// none of the presses on the edges.
+	if os.Getenv("MYGO_CEF_DIR") != "" {
+		// Chromium takes a moment to take clicks again after its window
+		// resized, which no one clicks within.
+		time.Sleep(300 * time.Millisecond)
+	}
 	movePointer(b.X+100, b.Y+100)
 	cursor("")
 	pressButton(true)
@@ -587,8 +602,7 @@ func TestFramelessResizeEdges(t *testing.T) {
 
 func TestDockedDevTools(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Title: "DevTools", Width: 800, Height: 600, DevTools: mygo.DevToolsEnabled})
-	w.LoadHTML("<p>inspect me</p>", "")
-	waitFor(t, w, "document.readyState === 'complete'")
+	loadHTML(t, w, "<p>inspect me</p>")
 	if !dockDevTools(w) {
 		t.Skip("docking the inspector is not automated here")
 	}
@@ -1177,8 +1191,8 @@ func TestPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	origin := "app://localhost"
-	if runtime.GOOS == "windows" {
-		origin = "http://app.localhost" // how WebView2 serves custom schemes
+	if httpSchemes() {
+		origin = "http://app.localhost" // how Chromium serves custom schemes
 	}
 	waitFor(t, w, `location.origin === "`+origin+`" && document.readyState === "complete"`)
 	// The app's own pages are secure contexts with a real origin, which
@@ -1319,17 +1333,31 @@ func TestFindInPage(t *testing.T) {
 
 func TestGlobalShortcut(t *testing.T) {
 	pressed := make(chan struct{}, 1)
-	if err := mygo.GlobalShortcut.Register("Ctrl+Shift+K", func() { pressed <- struct{}{} }); err != nil {
+	report := func() {
+		select {
+		case pressed <- struct{}{}:
+		default:
+		}
+	}
+	if err := mygo.GlobalShortcut.Register("Ctrl+Shift+K", report); err != nil {
 		t.Fatal(err)
 	}
 	defer mygo.GlobalShortcut.Unregister("Ctrl+Shift+K")
-	if !pressCtrlShiftK() {
-		t.Skip("no keyboard automation on this platform")
-	}
-	select {
-	case <-pressed:
-	case <-time.After(3 * time.Second):
-		t.Fatal("the global shortcut was not reported")
+	// X drops the keys pressed while no window has the focus, as when the
+	// window of the previous test has just closed: press until reported.
+	for deadline := time.Now().Add(3 * time.Second); ; {
+		if !pressCtrlShiftK() {
+			t.Skip("no keyboard automation on this platform")
+		}
+		select {
+		case <-pressed:
+			return
+		case <-time.After(250 * time.Millisecond):
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the global shortcut was not reported")
+		}
+		t.Log("pressing the shortcut again")
 	}
 }
 
@@ -1410,8 +1438,7 @@ func TestCloseEvents(t *testing.T) {
 
 func TestCapturePage(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Width: 320, Height: 240})
-	w.LoadHTML(`<body style="margin:0;background:rgb(255,0,0)"></body>`, "")
-	waitFor(t, w, "document.readyState === 'complete'")
+	loadHTML(t, w, `<body style="margin:0;background:rgb(255,0,0)"></body>`)
 	time.Sleep(200 * time.Millisecond)
 	png, err := w.CapturePage()
 	if err != nil {
@@ -1675,8 +1702,7 @@ func expectClick(t *testing.T, clicks chan string, want string) {
 
 func TestJavaScriptAlert(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300})
-	w.LoadHTML("<p>alert</p>", "")
-	waitFor(t, w, "document.readyState === 'complete'")
+	loadHTML(t, w, "<p>alert</p>")
 	if _, ok := endSheet(w); !ok {
 		t.Skip("dialog automation not available on this platform")
 	}
@@ -1749,8 +1775,7 @@ func TestWindowOpenAllowed(t *testing.T) {
 // TestClick is a regression test: clicking the page used to crash on macOS.
 func TestClick(t *testing.T) {
 	w := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300})
-	w.LoadHTML(`<body style="margin:0"><button id="b" style="width:200px;height:100px" onclick="window.clicked=(window.clicked||0)+1">x</button></body>`, "")
-	waitFor(t, w, "document.readyState === 'complete'")
+	loadHTML(t, w, `<body style="margin:0"><button id="b" style="width:200px;height:100px" onclick="window.clicked=(window.clicked||0)+1">x</button></body>`)
 	if !click(w, 50, 50) {
 		t.Skip("click automation not available on this platform")
 	}
@@ -1759,8 +1784,7 @@ func TestClick(t *testing.T) {
 
 	// Clicking a drag region of a frameless window starts a native drag.
 	f := newWindow(t, mygo.WindowOptions{Width: 400, Height: 300, Frameless: true})
-	f.LoadHTML(`<body style="margin:0"><div id="bar" style="--app-region:drag;height:40px" onmousedown="window.pressed=true"></div></body>`, "")
-	waitFor(t, f, "document.readyState === 'complete'")
+	loadHTML(t, f, `<body style="margin:0"><div id="bar" style="--app-region:drag;height:40px" onmousedown="window.pressed=true"></div></body>`)
 	click(f, 100, 20)
 	waitFor(t, f, "window.pressed === true")
 	if !f.IsVisible() {

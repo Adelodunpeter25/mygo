@@ -10,15 +10,16 @@ wire protocol, TypeScript generation, and the checklist for adding features.
 ## Hard rules
 
 - **No cgo.** Everything must build with `CGO_ENABLED=0`. Call native code
-  through purego (`internal/darwin`, `internal/linux`) or `syscall`
-  (`internal/windows`), never `import "C"`.
+  through purego (`internal/darwin`, `internal/linux`, `internal/cef`) or
+  `syscall` (`internal/windows`), never `import "C"`.
 - **Bun is dev tooling only.** The repository is a Bun workspace
   (`packages/bridge`, `packages/runtime`, `packages/cli` with its platform
   packages, the plugins' packages in `plugins/`, and examples with a frontend, which keep it at their root like
   the project template, and `website`); Bun also installs and runs the template's scripts
   (Vite, the mygo-cli package). Nothing in an app may need Bun at run time.
-- **Scope:** system webview on macOS, Linux and Windows (WebView2). The
-  bundled CEF option is out of scope until asked. Other platforms must keep
+- **Scope:** system webview on macOS, Linux and Windows (WebView2), and on
+  Linux, Chromium bundled through CEF (`linux.cef`, `internal/cef`). CEF on
+  other platforms is out of scope until asked. Other platforms must keep
   compiling through `internal/unsupported`.
 - **Great DX over Electron parity.** Keep the familiar feel (app lifecycle,
   windows, menus) but design Go-first APIs: typed IPC via `mygo.Bind` and
@@ -45,7 +46,8 @@ go run ./cmd/mygo build examples/todo      # .app + .dmg in examples/todo/build
 bun run --cwd website dev                  # the website, with docs/ at /docs (see website/README.md)
 ```
 
-Linux GUI tests cross-compile and run in a container with WebKitGTK and Xvfb;
+Linux GUI tests cross-compile and run in a container with WebKitGTK and Xvfb,
+and with CEF given `MYGO_CEF_DIR`;
 Windows GUI tests need Windows with the WebView2 Runtime (a GitHub Actions
 `windows-latest` runner has it). See "Testing" in the architecture guide.
 

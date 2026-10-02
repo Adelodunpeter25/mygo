@@ -93,6 +93,8 @@ type Backend interface {
 // AppOptions configures Backend.Init.
 type AppOptions struct {
 	Name string
+	// Dev reports a development build (mygo.IsDev).
+	Dev bool
 	// ActivationPolicy is "regular" (default), "accessory" or "prohibited".
 	// Only meaningful on macOS.
 	ActivationPolicy string
@@ -459,6 +461,16 @@ type SchemeBodyWriter interface {
 	// thread, never at the same time as the other methods, and fails
 	// once the webview no longer reads the response.
 	WriteBody(p []byte) error
+}
+
+// MessagePoster is implemented by Windows whose pages take the core's
+// messages as data rather than as a script that passes them to
+// __mygo.receive, which the engine would have to compile.
+type MessagePoster interface {
+	// PostMessages passes msgs, a JSON array the caller does not use
+	// again, to the page's __mygo.receive, or reports false when the page
+	// takes them as a script.
+	PostMessages(msgs []byte) bool
 }
 
 // MenuItemType is the kind of a menu item.

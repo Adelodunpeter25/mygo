@@ -46,7 +46,7 @@ type editor struct {
 	composeCaret  int
 	queue         []editEvent
 	multiline     bool
-	readOnly      bool // selectable text: selected and copied, not edited
+	readOnly      bool   // selectable text: selected and copied, not edited
 	source        string // the text of selectable text
 	password      bool
 	placeholder   string

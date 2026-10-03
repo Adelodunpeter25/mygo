@@ -169,7 +169,7 @@ func (g *gallery) overview(c *ui.Context) {
 			})
 		})
 		card(c, "Live data", func() {
-			ui.Text(c, "A goroutine pushes a sample every 200 ms with Window.Update.").TextColor(t.TextMuted).MaxWidth(260)
+			ui.Text(c, "A goroutine pushes a sample every second with Window.Update.").TextColor(t.TextMuted).MaxWidth(260)
 			g.sparkline(c).Size(260, 80)
 		})
 		card(c, "Files", func() {
@@ -540,16 +540,22 @@ func main() {
 			Content:  ui.View(g.view),
 		})
 		go func() {
-			x := 0.0
-			for range time.Tick(200 * time.Millisecond) {
+			x, sample := 0.0, func(x float64) float64 { return 0.5 + 0.35*math.Sin(x) + 0.1*math.Sin(x*3.1) }
+			// A minute of samples to start with, then one a second, when
+			// the clock changes: the window draws nothing in between.
+			history := make([]float64, 60)
+			for i := range history {
 				x += 0.35
-				v := 0.5 + 0.35*math.Sin(x) + 0.1*math.Sin(x*3.1)
+				history[i] = sample(x)
+			}
+			g.win.Update(func() { g.samples = history })
+			for {
+				time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+				x += 0.35
+				v := sample(x)
 				g.win.Update(func() {
 					g.now = time.Now()
-					g.samples = append(g.samples, v)
-					if len(g.samples) > 60 {
-						g.samples = g.samples[1:]
-					}
+					g.samples = append(g.samples[1:], v)
 				})
 			}
 		}()

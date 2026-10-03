@@ -439,8 +439,10 @@ func (e *Element) Bold() *Element { return e.FontWeight(700) }
 // Italic sets an italic font.
 func (e *Element) Italic() *Element { e.ts.italic = true; e.ts.set |= setItalic; return e }
 
-// Font sets the font family, a comma-separated list; "monospace" and
-// "system-ui" are the system's own fonts.
+// Font sets the font family, a comma-separated list: the first family the
+// system or the app has draws the text, and the others, in order, what it
+// lacks, before the system's choice. "monospace" and "system-ui" are the
+// system's own fonts.
 func (e *Element) Font(family string) *Element { e.ts.family = family; e.ts.set |= setFamily; return e }
 
 // TextColor sets the color of text.

@@ -197,7 +197,9 @@ func init() {
 ```
 
 Then `Font("Inter")` uses it, or set it for every element in the theme's
-`Font`.
+`Font`. A list of families, as `Font("Inter, Noto Sans JP")`, draws with
+the first the system or the app has, and what it lacks with the next that
+has it, before the system's own choice.
 
 ## Styling and themes
 

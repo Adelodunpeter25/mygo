@@ -453,3 +453,36 @@ func TestDigitFeatures(t *testing.T) {
 		t.Errorf("proportional ones are %v wide, tabular ones %v", proportional, tabular)
 	}
 }
+
+// TestFontListFallback draws what the first family of a list lacks with
+// the next family that has it, before the system's choice.
+func TestFontListFallback(t *testing.T) {
+	second := map[string]string{"windows": "MS Gothic", "darwin": "Hiragino Mincho ProN", "linux": "Noto Serif CJK JP"}[runtime.GOOS]
+	s := newSystem()
+	if err := s.RegisterFont(goregular.TTF, "MyGo Latin"); err != nil {
+		t.Fatal(err)
+	}
+	// drawn tells fonts apart by what they draw, as engines may make a
+	// Font of one face for each family list.
+	drawn := func(text, family string, rune int) [4]float32 {
+		for _, g := range s.Layout(Params{Text: text, Style: Style{Size: 20, Family: family}}).Lines[0].Glyphs {
+			if g.Cluster == rune {
+				return [4]float32{float32(g.ID), g.Advance, g.Font.Ascent, g.Font.Descent}
+			}
+		}
+		return [4]float32{}
+	}
+	want := drawn("日", second, 0)
+	// Without a font that has it, engines draw a missing glyph: 0, or one
+	// of Pango's PANGO_GLYPH_UNKNOWN_FLAG.
+	if id := uint32(want[0]); id == 0 || id&0x10000000 != 0 || want == drawn("日", "MyGo Latin", 0) {
+		t.Skipf("%s is missing, or what the system falls back to", second)
+	}
+	list := "MyGo Latin, " + second
+	if got := drawn("A日", list, 1); got != want {
+		t.Errorf("日 in %q is not drawn with %s", list, second)
+	}
+	if drawn("A日", list, 0) != drawn("A", "MyGo Latin", 0) {
+		t.Errorf("A in %q is not drawn with MyGo Latin", list)
+	}
+}

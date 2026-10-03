@@ -128,6 +128,7 @@ var ct struct {
 	// (macOS 10.13).
 	trackingName    uintptr
 	kernName        uintptr
+	cascadeList     uintptr
 	featureSettings uintptr
 	featureTag      uintptr
 	featureValue    uintptr
@@ -273,6 +274,7 @@ func loadCoreText() error {
 	}
 	ct.trackingName = optional(text, "kCTTrackingAttributeName")
 	ct.kernName = optional(text, "kCTKernAttributeName")
+	ct.cascadeList = optional(text, "kCTFontCascadeListAttribute")
 	ct.featureSettings = optional(text, "kCTFontFeatureSettingsAttribute")
 	ct.featureTag = optional(text, "kCTFontOpenTypeFeatureTag")
 	ct.featureValue = optional(text, "kCTFontOpenTypeFeatureValue")
@@ -413,6 +415,17 @@ func (e *coreText) systemFont(size float32, weight int, italic, mono bool) uintp
 
 // named returns a font of a family the system has, owned, or 0.
 func (e *coreText) named(family string, size float32, weight int, italic bool) uintptr {
+	desc := e.namedDesc(family, weight, italic)
+	if desc == 0 {
+		return 0
+	}
+	defer ct.release(desc)
+	return ct.fontWithDescriptor(desc, float64(size), 0)
+}
+
+// namedDesc returns the descriptor of the face of a family the system has
+// that best matches a weight and italics, owned, or 0.
+func (e *coreText) namedDesc(family string, weight int, italic bool) uintptr {
 	name := cfString(family)
 	defer ct.release(name)
 	symbolic := int32(0)
@@ -435,12 +448,7 @@ func (e *coreText) named(family string, size float32, weight int, italic bool) u
 	mandatory := []uintptr{ct.familyNameAttribute}
 	set := ct.setCreate(0, &mandatory[0], 1, ct.setCallbacks)
 	defer ct.release(set)
-	match := ct.descriptorMatching(desc, set)
-	if match == 0 {
-		return 0
-	}
-	defer ct.release(match)
-	return ct.fontWithDescriptor(match, float64(size), 0)
+	return ct.descriptorMatching(desc, set)
 }
 
 // ctFont returns the CTFont of a style.
@@ -469,7 +477,9 @@ func (e *coreText) ctFont(style Style) uintptr {
 		return font
 	}
 	var font uintptr
-	for _, family := range familyList(key.Family) {
+	families, chosen := familyList(key.Family), -1
+	for i, family := range families {
+		chosen = i
 		switch generic(family) {
 		case "system-ui", "sans-serif":
 			font = e.systemFont(key.Size, key.Weight, key.Italic, false)
@@ -494,6 +504,34 @@ func (e *coreText) ctFont(style Style) uintptr {
 	}
 	if font == 0 {
 		font = e.systemFont(key.Size, key.Weight, key.Italic, false)
+	} else if ct.cascadeList != 0 {
+		// The families after it come before the system's for what it
+		// lacks.
+		var descs []uintptr
+		for _, family := range families[chosen+1:] {
+			if generic(family) != "" {
+				continue
+			}
+			if faces, ok := e.registered[strings.ToLower(family)]; ok {
+				d := registeredDesc(faces, key)
+				ct.retain(d)
+				descs = append(descs, d)
+			} else if d := e.namedDesc(family, key.Weight, key.Italic); d != 0 {
+				descs = append(descs, d)
+			}
+		}
+		if len(descs) > 0 {
+			array := ct.arrayCreate(0, &descs[0], len(descs), ct.arrayCallbacks)
+			attrs := cfDictionary([]uintptr{ct.cascadeList}, []uintptr{array})
+			desc := ct.descriptorWithAttrs(attrs)
+			if with := ct.fontWithAttrs(font, 0, 0, desc); with != 0 {
+				ct.release(font)
+				font = with
+			}
+			for _, obj := range append(descs, array, attrs, desc) {
+				ct.release(obj)
+			}
+		}
 	}
 	e.primary[key] = font
 	return font
@@ -578,6 +616,12 @@ func withFeatures(font uintptr, fs []feature) uintptr {
 // registeredFont returns the font of the face of a registered family that
 // best matches a style, owned.
 func registeredFont(faces []registeredFace, style Style) uintptr {
+	return ct.fontWithDescriptor(registeredDesc(faces, style), float64(style.FontSize()), 0)
+}
+
+// registeredDesc returns the descriptor of the face of a registered family
+// that best matches a style, not owned.
+func registeredDesc(faces []registeredFace, style Style) uintptr {
 	want := nsWeight(style.weight())
 	best := -1
 	score := func(f registeredFace) float64 {
@@ -592,7 +636,7 @@ func registeredFont(faces []registeredFace, style Style) uintptr {
 			best = i
 		}
 	}
-	return ct.fontWithDescriptor(faces[best].desc, float64(style.FontSize()), 0)
+	return faces[best].desc
 }
 
 func (e *coreText) font(style Style) *Font {

@@ -80,7 +80,8 @@ before changing anything under `internal/`.
 │                       websocket; and updater, the update window, Go only
 ├── ui/                 native UI: views, layout, widgets, text editing, Tester
 ├── cmd/mygo/           the CLI: init, generate, dev, build, doctor
-├── examples/           hello, todo, frameless, native, vibrancy, gallery (native UI)
+├── examples/           hello, todo, frameless, native, vibrancy; counter-native
+│                       and gallery (native UI)
 ├── docs/               the user guides, the official plugins' pages
 │                       (plugins/), and this architecture guide
 └── website/            the website, with these docs: TanStack Start, prerendered

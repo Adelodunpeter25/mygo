@@ -8,6 +8,7 @@
 package text
 
 import (
+	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -26,8 +27,9 @@ type engine interface {
 	// shape breaks text, a paragraph without newlines, into lines of at
 	// most width DIPs, or into one line when width is 0, and shapes them.
 	// rtl sets the paragraph's direction; wholeWords lets a word longer
-	// than a line overflow it instead of breaking it.
-	shape(text []rune, style Style, width float32, rtl, wholeWords bool) []shapedLine
+	// than a line overflow it instead of breaking it. spans style runs of
+	// the text apart from style, with their ends relative to it.
+	shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine
 	// glyph rasterizes glyph id of f at scale pixels per DIP, its origin
 	// dx pixels (0 ≤ dx < 1) right of the left edge of a pixel.
 	glyph(f *Font, id uint32, scale, dx float32) bitmap
@@ -93,6 +95,37 @@ func generic(family string) string {
 		return "monospace"
 	}
 	return ""
+}
+
+// feature is an OpenType feature of Style.Features: its tag and value, 0
+// to turn it off, 1 on, or the alternate to pick.
+type feature struct {
+	tag   [4]byte
+	value uint32
+}
+
+// features parses Style.Features, leaving out what is not a tag of four
+// printable characters with an optional =value.
+func features(list string) []feature {
+	var out []feature
+	for _, item := range strings.Split(list, ",") {
+		tag, value, set := strings.Cut(strings.TrimSpace(item), "=")
+		tag = strings.TrimSpace(tag)
+		f := feature{value: 1}
+		if set {
+			v, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32)
+			if err != nil {
+				continue
+			}
+			f.value = uint32(v)
+		}
+		if len(tag) != 4 || strings.ContainsFunc(tag, func(r rune) bool { return r < 0x20 || r > 0x7e }) {
+			continue
+		}
+		copy(f.tag[:], tag)
+		out = append(out, f)
+	}
+	return out
 }
 
 // familyList splits a comma-separated list of families, without quotes.

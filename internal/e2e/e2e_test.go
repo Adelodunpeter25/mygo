@@ -1992,6 +1992,25 @@ func TestContentWindow(t *testing.T) {
 	if c := at(300, 250); c.B < 200 || c.R > 60 {
 		t.Errorf("the background is %v", c)
 	}
+	// With MYGO_GPU=1 Linux draws with OpenGL without a GPU too: the
+	// capture is drawn on the CPU, the GtkGLArea shows what OpenGL drew.
+	if os.Getenv("MYGO_GPU") == "1" {
+		if how, pix, gw, _, ok := glSurface(w); ok {
+			if how != "opengl" || len(pix) == 0 {
+				t.Fatalf("the surface draws %q, not with OpenGL", how)
+			}
+			bgra := func(x, y float64) []byte {
+				s := float64(gw) / 400
+				return pix[(int(y*s)*gw+int(x*s))*4:][:4]
+			}
+			if c := bgra(100, 50); c[2] < 200 || c[0] > 60 {
+				t.Errorf("the red box is %v (BGRA) in the GtkGLArea", c)
+			}
+			if c := bgra(300, 250); c[0] < 200 || c[2] > 60 {
+				t.Errorf("the background is %v (BGRA) in the GtkGLArea", c)
+			}
+		}
+	}
 
 	before := frames.Load()
 	w.Update(func() { label.Store("after") })
@@ -2012,4 +2031,45 @@ func TestContentWindow(t *testing.T) {
 			t.Errorf("the Control-click clicked: %d clicks", clicks.Load())
 		}
 	}
+}
+
+func TestContentWindowContextMenu(t *testing.T) {
+	var frames atomic.Int32
+	var chosen atomic.Value
+	chosen.Store("")
+	view := func(c *ui.Context) {
+		frames.Add(1)
+		ui.Box(c).Fill().Children(func() {
+			ui.Box(c).Size(200, 100).Background(ui.RGB(255, 0, 0)).ContextMenu(func(m *ui.Menu) {
+				for _, label := range []string{"First", "Second"} {
+					if m.Item(label).Chosen() {
+						chosen.Store(label)
+					}
+				}
+				m.Separator()
+				m.Item("Third").Disabled(true)
+			})
+		})
+	}
+	w := newWindow(t, mygo.WindowOptions{Title: "Context menu", Width: 400, Height: 300, Content: ui.View(view)})
+	eventually(t, "a frame", func() bool { return frames.Load() > 0 })
+	if _, ok := popupMenus(); !ok || !rightClick(w, 100, 50) {
+		t.Skip("context menu automation not available on this platform")
+	}
+	var menus [][]string
+	eventually(t, "the context menu", func() bool {
+		menus, _ = popupMenus()
+		return len(menus) == 1
+	})
+	if want := []string{"First", "Second", "-", "Third"}; !slices.Equal(menus[0], want) {
+		t.Errorf("the menu shows %q, want %q", menus[0], want)
+	}
+	if !choosePopupItem("Second") {
+		t.Fatal("the menu has no item Second")
+	}
+	eventually(t, "the choice", func() bool { return chosen.Load() == "Second" })
+	eventually(t, "the menu to close", func() bool {
+		menus, _ = popupMenus()
+		return len(menus) == 0
+	})
 }

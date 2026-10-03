@@ -66,6 +66,8 @@ var (
 	iidIDWriteFontFace2     = guid{0xd8b768ff, 0x64bc, 0x4e66, [8]byte{0x98, 0x2b, 0xec, 0x8e, 0x87, 0xf6, 0x93, 0xf7}}
 	iidIDWritePixelSnapping = guid{0xeaf3a2da, 0xecf4, 0x4d24, [8]byte{0xb6, 0x44, 0xb3, 0x4f, 0x68, 0x42, 0x02, 0x4b}}
 	iidIDWriteTextRenderer  = guid{0xef8a8135, 0x5cc6, 0x45fe, [8]byte{0x88, 0x25, 0xc5, 0xa0, 0x72, 0x4e, 0xb8, 0x19}}
+	iidIDWriteTextLayout1   = guid{0x9064d822, 0x80a7, 0x465c, [8]byte{0xa9, 0x86, 0xdf, 0x65, 0xf7, 0x8b, 0x8f, 0xeb}}
+	iidIDWriteTextFormat1   = guid{0x5f174b49, 0x0d8b, 0x4cfb, [8]byte{0x8b, 0xca, 0xf1, 0xcc, 0xe9, 0xd0, 0x6c, 0x67}}
 )
 
 // Vtable indices, from the Windows SDK headers.
@@ -79,11 +81,18 @@ const (
 	factoryGetSystemFontCollection = 3
 	factoryRegisterFontFileLoader  = 13
 	factoryCreateTextFormat        = 15
+	factoryCreateTypography        = 16
 	factoryCreateTextLayout        = 18
 	factoryCreateGlyphRunAnalysis  = 23
 	// IDWriteFactory2
+	factory2GetSystemFontFallback  = 26
+	factory2CreateFallbackBuilder  = 27
 	factory2TranslateColorGlyphRun = 28
 	factory2CreateGlyphRunAnalysis = 30
+	fallbackAddMapping             = 3
+	fallbackAddMappings            = 4
+	fallbackCreate                 = 5
+	format1SetFontFallback         = 34
 	// IDWriteFactory3
 	factory3CreateFontCollectionFromFontSet = 37
 	// IDWriteFactory5
@@ -112,9 +121,17 @@ const (
 	formatSetTextAlignment     = 3
 	formatSetWordWrapping      = 5
 	formatSetReadingDirection  = 6
+	layoutSetFontCollection    = 30
+	layoutSetFontFamilyName    = 31
+	layoutSetFontWeight        = 32
+	layoutSetFontStyle         = 33
+	layoutSetFontSize          = 35
+	layoutSetTypography        = 40
 	layoutDraw                 = 58
 	layoutGetLineMetrics       = 59
 	layoutHitTestTextPosition  = 65
+	layout1SetCharacterSpacing = 69
+	typographyAddFontFeature   = 3
 	glyphsGetAlphaTextureBound = 3
 	glyphsCreateAlphaTexture   = 4
 	colorRunsMoveNext          = 3
@@ -287,9 +304,12 @@ type dwrite struct {
 
 	exists  map[string]bool // whether the system has a family
 	formats map[formatKey]uintptr
-	faces   map[faceKey]uintptr
-	fonts   map[fontKey]*Font
-	color   map[uintptr]bool // whether a font face has color glyphs
+	// fallbacks are the font fallbacks of family lists, 0 for a list of
+	// one family.
+	fallbacks map[string]uintptr
+	faces     map[faceKey]uintptr
+	fonts     map[fontKey]*Font
+	color     map[uintptr]bool // whether a font face has color glyphs
 
 	// The fonts the app registers: their files, a collection of them,
 	// and the family name of each name they are registered under.
@@ -302,6 +322,7 @@ type dwrite struct {
 }
 
 type formatKey struct {
+	list   string // the family list, whose others the fallback tries
 	family string
 	custom bool
 	weight int
@@ -326,12 +347,13 @@ func newDWrite() (*dwrite, error) {
 		return nil, err
 	}
 	e := &dwrite{
-		exists:  map[string]bool{},
-		formats: map[formatKey]uintptr{},
-		faces:   map[faceKey]uintptr{},
-		fonts:   map[fontKey]*Font{},
-		color:   map[uintptr]bool{},
-		aliases: map[string]string{},
+		exists:    map[string]bool{},
+		formats:   map[formatKey]uintptr{},
+		fallbacks: map[string]uintptr{},
+		faces:     map[faceKey]uintptr{},
+		fonts:     map[fontKey]*Font{},
+		color:     map[uintptr]bool{},
+		aliases:   map[string]string{},
 	}
 	hr, _, _ := procDWriteCreate.Call(factoryTypeShared, uintptr(unsafe.Pointer(&iidIDWriteFactory)), uintptr(unsafe.Pointer(&e.factory)))
 	if failed(hr) || e.factory == 0 {
@@ -413,7 +435,7 @@ func dwStyle(italic bool) uintptr {
 
 func (e *dwrite) format(style Style) uintptr {
 	family, custom := e.family(style.Family)
-	key := formatKey{family, custom, style.weight(), style.Italic, style.FontSize()}
+	key := formatKey{style.Family, family, custom, style.weight(), style.Italic, style.FontSize()}
 	if f, ok := e.formats[key]; ok {
 		return f
 	}
@@ -430,8 +452,78 @@ func (e *dwrite) format(style Style) uintptr {
 	if failed(hr) {
 		return 0
 	}
+	// The families of the list after the one it draws with come before the
+	// system's for what that one lacks; IDWriteTextFormat1 came with
+	// Windows 8.1.
+	if fb := e.fallback(style.Family); fb != 0 {
+		if f1 := queryInterface(format, &iidIDWriteTextFormat1); f1 != 0 {
+			call(f1, format1SetFontFallback, fb)
+			release(f1)
+		}
+	}
 	e.formats[key] = format
 	return format
+}
+
+// fallback returns a font fallback trying the families of a list after the
+// first the app or the system has, before the system's own fallback; 0
+// when there are none.
+func (e *dwrite) fallback(list string) uintptr {
+	if fb, ok := e.fallbacks[list]; ok {
+		return fb
+	}
+	type family struct {
+		name   string
+		custom bool
+	}
+	var families []family
+	first := true
+	for _, f := range familyList(list) {
+		if g := generic(f); g != "" {
+			// The system's generic families fall back as the system does.
+			first = first && !slices.ContainsFunc(dwGeneric[g], e.hasSystem)
+			continue
+		}
+		var fam family
+		if name, ok := e.aliases[strings.ToLower(f)]; ok {
+			fam = family{name, true}
+		} else if e.hasSystem(f) {
+			fam = family{f, false}
+		} else {
+			continue
+		}
+		if first {
+			first = false
+			continue
+		}
+		families = append(families, fam)
+	}
+	var fb uintptr
+	defer func() { e.fallbacks[list] = fb }()
+	if len(families) == 0 || e.factory2 == 0 {
+		return 0
+	}
+	var builder uintptr
+	if failed(call(e.factory2, factory2CreateFallbackBuilder, uintptr(unsafe.Pointer(&builder)))) {
+		return 0
+	}
+	defer release(builder)
+	// DWRITE_UNICODE_RANGE: all of Unicode.
+	all := [2]uint32{0, 0x10FFFF}
+	for _, f := range families {
+		name := utf16z(f.name)
+		names := []*uint16{&name[0]}
+		method[func(this uintptr, ranges *[2]uint32, nRanges uint32, names **uint16, nNames uint32, coll uintptr, locale, base *uint16, scale float32) uintptr](builder, fallbackAddMapping)(
+			builder, &all, 1, &names[0], 1, e.collection(f.custom), nil, nil, 1)
+		runtime.KeepAlive(name)
+	}
+	var system uintptr
+	if !failed(call(e.factory2, factory2GetSystemFontFallback, uintptr(unsafe.Pointer(&system)))) {
+		call(builder, fallbackAddMappings, system)
+		release(system)
+	}
+	call(builder, fallbackCreate, uintptr(unsafe.Pointer(&fb)))
+	return fb
 }
 
 func (e *dwrite) font(style Style) *Font {
@@ -590,7 +682,7 @@ func collect(run *dwGlyphRun, desc *dwGlyphRunDescription) {
 	drawing = append(drawing, r)
 }
 
-func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords bool) []shapedLine {
+func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
 	format := e.format(style)
 	if format == 0 || len(text) == 0 {
 		return nil
@@ -611,6 +703,7 @@ func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords 
 		wrapping = wordWrappingWholeWord
 	}
 	call(layout, formatSetWordWrapping, wrapping)
+	e.typeset(layout, style, spans, text)
 	if rtl {
 		// Trailing alignment keeps the lines at the left, as left-to-right
 		// lines are.
@@ -653,6 +746,85 @@ func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords 
 		lines[li].runs = append(lines[li].runs, e.run(r, x, index))
 	}
 	return lines
+}
+
+// typeset applies a style's letter spacing and OpenType features to a text
+// layout of text, and the styles of its spans to their ranges.
+func (e *dwrite) typeset(layout uintptr, style Style, spans []Span, text []rune) {
+	// The code unit of each rune, and a DWRITE_TEXT_RANGE of runes, passed
+	// in a register.
+	units := make([]uint32, len(text)+1)
+	for i, r := range text {
+		units[i+1] = units[i] + 1
+		if r >= 0x10000 {
+			units[i+1]++
+		}
+	}
+	textRange := func(from, to int) uintptr {
+		return uintptr(units[from]) | uintptr(units[to]-units[from])<<32
+	}
+	all := textRange(0, len(text))
+	e.spacing(layout, style.LetterSpacing, all)
+	e.typography(layout, style.Features, all)
+	from := 0
+	for _, sp := range spans {
+		to := max(from, min(sp.End, len(text)))
+		r := textRange(from, to)
+		from = to
+		if r>>32 == 0 {
+			continue
+		}
+		if sp.Family != "" {
+			family, custom := e.family(sp.Family)
+			name := utf16z(family)
+			call(layout, layoutSetFontCollection, e.collection(custom), r)
+			call(layout, layoutSetFontFamilyName, uintptr(unsafe.Pointer(&name[0])), r)
+			runtime.KeepAlive(name)
+		}
+		if sp.Weight > 0 {
+			call(layout, layoutSetFontWeight, uintptr(min(sp.Weight, 999)), r)
+		}
+		if sp.Italic {
+			call(layout, layoutSetFontStyle, fontStyleItalic, r)
+		}
+		if sp.Size > 0 {
+			method[func(this uintptr, size float32, r uintptr) uintptr](layout, layoutSetFontSize)(layout, sp.Size, r)
+		}
+		e.spacing(layout, sp.LetterSpacing, r)
+		e.typography(layout, sp.Features, r)
+	}
+}
+
+// spacing adds letter spacing to a range of a text layout.
+func (e *dwrite) spacing(layout uintptr, spacing float32, r uintptr) {
+	if spacing == 0 {
+		return
+	}
+	// IDWriteTextLayout1 came with Windows 8.
+	if l1 := queryInterface(layout, &iidIDWriteTextLayout1); l1 != 0 {
+		method[func(this uintptr, leading, trailing, minAdvance float32, r uintptr) uintptr](l1, layout1SetCharacterSpacing)(l1, 0, spacing, 0, r)
+		release(l1)
+	}
+}
+
+// typography sets OpenType features over a range of a text layout.
+func (e *dwrite) typography(layout uintptr, list string, r uintptr) {
+	fs := features(list)
+	if len(fs) == 0 {
+		return
+	}
+	var typography uintptr
+	if failed(call(e.factory, factoryCreateTypography, uintptr(unsafe.Pointer(&typography)))) {
+		return
+	}
+	defer release(typography)
+	for _, f := range fs {
+		// DWRITE_FONT_FEATURE{nameTag, parameter}, the tag in the byte order
+		// of DWRITE_MAKE_OPENTYPE_TAG.
+		tag := uint32(f.tag[0]) | uint32(f.tag[1])<<8 | uint32(f.tag[2])<<16 | uint32(f.tag[3])<<24
+		call(typography, typographyAddFontFeature, uintptr(tag)|uintptr(f.value)<<32)
+	}
+	call(layout, layoutSetTypography, typography, r)
 }
 
 // run positions the glyphs of a run whose origin, on the right for a
@@ -974,4 +1146,15 @@ func familyNames(coll uintptr) []string {
 		release(fam)
 	}
 	return names
+}
+
+func (e *dwrite) fontCount() int { return len(e.fonts) }
+
+// forgetFonts lets go of the faces of the Fonts made so far; the faces of
+// the families stay.
+func (e *dwrite) forgetFonts() {
+	for _, f := range e.fonts {
+		release(f.native)
+	}
+	clear(e.fonts)
 }

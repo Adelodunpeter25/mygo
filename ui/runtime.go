@@ -27,6 +27,9 @@ type host interface {
 	// invalidate asks for a frame from any goroutine.
 	invalidate()
 	openURL(string)
+	// popupMenu shows a context menu at (x, y) after the event being
+	// handled; chosen receives the ID of the item chosen.
+	popupMenu(m *platform.Menu, x, y float32, chosen func(id int))
 }
 
 // engine runs the user interface of one window: it builds frames with
@@ -38,9 +41,14 @@ type engine struct {
 	c     Context
 	text  *text.System
 	scene scene.Scene
+	paths paths
+	flex  flexScratch
 
 	states map[uint64]*state
 	frame  uint64
+	// pass is the pass of the view building the frame: the last one
+	// builds the elements that stay.
+	pass int
 
 	// What the last frame laid out, for input until the next one.
 	hits       []hit
@@ -58,6 +66,9 @@ type engine struct {
 	focusVisible       bool
 	windowFocused      bool
 	keys               []keyEvent
+	menu               menuState
+	toasts             []toast
+	nextToast          uint64
 
 	consumed  bool
 	animating bool
@@ -162,13 +173,16 @@ func (rt *engine) runFrame() {
 	// An event handled while building (a click, an edit) may change what
 	// was built before it: build again, so the frame shows the outcome.
 	for pass := 0; pass < 3; pass++ {
+		rt.pass = pass
 		rt.consumed = false
 		rt.nextRegs = rt.nextRegs[:0]
 		rt.c.reset(now, w, h)
 		rt.view(&rt.c)
+		rt.buildToasts(&rt.c)
 		if ov := rt.c.overlay; ov != nil {
 			rt.c.root.add(ov)
 		}
+		rt.resolveMenu()
 		rt.endPass()
 		if !rt.consumed {
 			break
@@ -197,12 +211,13 @@ func (rt *engine) runFrame() {
 		rt.host.requestFrame()
 	}
 	rt.armTimer()
+	rt.showMenu()
 }
 
 // endPass forgets the input the pass handled.
 func (rt *engine) endPass() {
 	for _, s := range rt.states {
-		if s.seen != rt.frame {
+		if s.seen != rt.frame || s.pass != rt.pass {
 			continue
 		}
 		s.clicks, s.rightClicks, s.doubleClicks = 0, 0, 0
@@ -210,13 +225,14 @@ func (rt *engine) endPass() {
 		s.changed, s.submitted = false, false
 		s.dropped = nil
 	}
+	rt.menu.chosen = 0
 	rt.delivered = rt.delivered[:0]
 }
 
 // prune forgets the elements the frame did not build.
 func (rt *engine) prune() {
 	for id, s := range rt.states {
-		if s.seen != rt.frame {
+		if s.seen != rt.frame || s.pass != rt.pass {
 			if rt.pressed == s {
 				rt.pressed = nil
 			}
@@ -284,7 +300,7 @@ func (rt *engine) commitElement(e *Element, clip Rect) {
 	}
 	s.flags = e.flags
 	s.cursor = e.cursor
-	if e.flags&flagEditable != 0 && s.cursor == 0 {
+	if e.flags&(flagEditable|flagSelectable) != 0 && s.cursor == 0 {
 		s.cursor = CursorText + 1
 	}
 	v := intersect(Rect{e.x, e.y, e.w, e.h}, clip)

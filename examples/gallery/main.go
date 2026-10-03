@@ -1,7 +1,7 @@
 // Gallery tours MyGo's own user interface toolkit: a window drawn on the
 // GPU from Go, without a web page. It shows layout, the widgets, text
-// editing, a list of ten thousand rows, custom drawing, overlays, file
-// drops and updates from other goroutines.
+// editing, a list of ten thousand rows with context menus, custom drawing,
+// overlays, file drops and updates from other goroutines.
 //
 //	go run ./examples/gallery
 package main
@@ -22,22 +22,30 @@ type gallery struct {
 	win  *mygo.Window
 	page string
 
-	count   int
-	agree   bool
-	notify  bool
-	size    string
-	plan    string
-	volume  float64
-	name    string
-	email   string
-	bio     string
-	filter  string
-	picked  int
-	dialog  bool
-	menu    bool
-	files   []string
-	now     time.Time
-	samples []float64
+	count    int
+	agree    bool
+	notify   bool
+	size     string
+	plan     string
+	volume   float64
+	name     string
+	email    string
+	bio      string
+	filter   string
+	picked   int
+	starred  map[int]bool
+	tab      int
+	split    float32
+	copies   float64
+	file     int
+	tree     map[string]bool
+	leaf     string
+	birthday time.Time
+	dialog   bool
+	menu     bool
+	files    []string
+	now      time.Time
+	samples  []float64
 }
 
 var pages = []string{"Overview", "Controls", "Text", "List", "Drawing", "Overlays"}
@@ -93,9 +101,9 @@ func (g *gallery) sidebar(c *ui.Context) {
 	})
 }
 
-func card(c *ui.Context, title string, body func()) {
+func card(c *ui.Context, title string, body func()) *ui.Element {
 	t := c.Theme()
-	ui.Column(c).Padding(18).Gap(12).Radius(10).Background(t.Background).Border(1, t.Border).
+	return ui.Column(c).Padding(18).Gap(12).Radius(10).Background(t.Background).Border(1, t.Border).
 		Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.06)).Children(func() {
 		if title != "" {
 			ui.Text(c, title).FontSize(15).Bold()
@@ -194,15 +202,35 @@ func (g *gallery) controls(c *ui.Context) {
 		})
 		ui.Progress(c, g.volume/100)
 		ui.Progress(c, -1)
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Copies")
+			ui.NumberInput(c, &g.copies, 1, 99, 1).Label("Copies")
+		})
 	})
 	card(c, "Buttons", func() {
 		ui.Row(c).Gap(8).Wrap().Children(func() {
-			ui.PrimaryButton(c, "Save")
+			if ui.PrimaryButton(c, "Save").Clicked() {
+				c.Toast("Saved")
+			}
 			ui.Button(c, "Cancel")
 			ui.Button(c, "Disabled").Disabled(true)
 			ui.Link(c, "Open mygo.dev", "https://github.com/egoist/mygo")
 		})
 		ui.Text(c, "Tab moves the focus; Enter or Space presses the focused button.").TextColor(t.TextMuted)
+	})
+	card(c, "Tabs and panes", func() {
+		ui.Tabs(c, &g.tab, "Files", "Search", "History")
+		ui.Split(c, &g.split, func() {
+			ui.Column(c).Fill().Padding(10).Gap(6).Background(t.Surface).Children(func() {
+				for _, name := range [][]string{{"main.go", "go.mod", "README.md"}, {"Results"}, {"Yesterday", "Last week"}}[g.tab] {
+					ui.Text(c, name).SingleLine()
+				}
+			})
+		}, func() {
+			ui.Column(c).Fill().Padding(10).Children(func() {
+				ui.Text(c, "Drag the divider, or focus it and press the arrows.").TextColor(t.TextMuted)
+			})
+		}).Height(140).Border(1, t.Border).Radius(t.Radius).Clip()
 	})
 }
 
@@ -220,12 +248,21 @@ func (g *gallery) text(c *ui.Context) {
 		label("About you")
 		ui.TextArea(c, &g.bio).Placeholder("Multiple lines, with undo, selection and input methods.").Label("About you").Height(110)
 		ui.Textf(c, "%d characters", len([]rune(g.bio))).FontSize(12).TextColor(t.TextMuted)
+		label("Birthday")
+		ui.DateInput(c, &g.birthday).Label("Birthday")
 	})
 	card(c, "Typography", func() {
 		ui.Text(c, "Display 28").FontSize(28).Bold()
 		ui.Text(c, "Italic, underlined and struck through").Italic().Underline().Strikethrough()
+		ui.RichText(c,
+			ui.Span{Text: "Rich text mixes "}, ui.Span{Text: "bold", Weight: 700}, ui.Span{Text: ", "},
+			ui.Span{Text: "colored", Color: t.Accent}, ui.Span{Text: ", "}, ui.Span{Text: "large", Size: 20},
+			ui.Span{Text: " and "}, ui.Span{Text: "underlined", Underline: true}, ui.Span{Text: " runs in one paragraph."},
+		)
 		ui.Text(c, "Monospace: func main() {}").Font("monospace")
-		ui.Text(c, "Mixed scripts: English, Ελληνικά, Русский, 日本語, 한국어, العربية, עברית, हिन्दी 🎉")
+		ui.Text(c, "SPACED CAPITALS").FontSize(12).Bold().LetterSpacing(2).TextColor(t.TextMuted)
+		ui.Text(c, "Tabular digits: 1,111.11 / 8,888.88").FontFeatures("tnum")
+		ui.Text(c, "Mixed scripts: English, Ελληνικά, Русский, 日本語, 한국어, العربية, עברית, हिन्दी 🎉").Selectable()
 		ui.Text(c, strings.Repeat("Long text wraps to the width it gets. ", 6)).TextColor(t.TextMuted)
 		ui.Text(c, strings.Repeat("A single line that ends with an ellipsis when it does not fit. ", 4)).SingleLine()
 	})
@@ -240,7 +277,7 @@ func (g *gallery) list(c *ui.Context) {
 			rows = append(rows, i)
 		}
 	}
-	ui.Textf(c, "%d rows; only those in view are built.", len(rows)).TextColor(t.TextMuted)
+	ui.Textf(c, "%d rows; only those in view are built. Right-click one for its menu.", len(rows)).TextColor(t.TextMuted)
 	ui.List(c, len(rows), 32, func(i int) {
 		n := rows[i]
 		row := ui.Row(c).Fill().PaddingX(12).Gap(10).Radius(6)
@@ -253,11 +290,64 @@ func (g *gallery) list(c *ui.Context) {
 		if row.Clicked() {
 			g.picked = n
 		}
+		row.ContextMenu(func(m *ui.Menu) {
+			if m.Item("Pick").Chosen() {
+				g.picked = n
+			}
+			if m.Item("Starred").Checked(g.starred[n]).Chosen() {
+				g.starred[n] = !g.starred[n]
+			}
+			m.Separator()
+			if m.Item("Copy Square").Chosen() {
+				mygo.Clipboard.WriteText(fmt.Sprint(n * n))
+			}
+		})
 		row.Children(func() {
-			ui.Textf(c, "Row %d", n).Grow(1)
+			label := fmt.Sprintf("Row %d", n)
+			if g.starred[n] {
+				label += "  ★"
+			}
+			ui.Text(c, label).Grow(1)
 			ui.Textf(c, "%d²  =  %d", n, n*n).Font("monospace").FontSize(12)
 		})
 	}).Height(420).Border(1, t.Border).Radius(8).Padding(4)
+	ui.Row(c).Gap(18).AlignItems(ui.Stretch).Height(260).Children(func() {
+		card(c, "Tree", func() {
+			item := func(path, label string, children func()) {
+				var open *bool
+				if children != nil {
+					o := g.tree[path]
+					open = &o
+					defer func() { g.tree[path] = o }()
+				}
+				if ui.TreeItem(c, label, open, children).Selected(g.leaf == path).Clicked() {
+					g.leaf = path
+				}
+			}
+			ui.Tree(c, func() {
+				item("ui", "ui", func() {
+					item("ui/widgets.go", "widgets.go", nil)
+					item("ui/text", "text", func() {
+						item("ui/text/layout.go", "layout.go", nil)
+					})
+				})
+				item("go.mod", "go.mod", nil)
+			})
+		}).Width(220)
+		files := []string{"report.pdf", "photo.jpg", "notes.md", "budget.xlsx", "slides.key", "song.mp3"}
+		card(c, "Table", func() {
+			cols := []ui.TableColumn{{Title: "Name"}, {Title: "Size", Width: 90, Align: ui.End}}
+			if ui.Table(c, cols, len(files), &g.file, func(row, col int) {
+				if col == 0 {
+					ui.Text(c, files[row]).SingleLine()
+				} else {
+					ui.Textf(c, "%d KB", (row+1)*173)
+				}
+			}).Grow(1).Submitted() {
+				c.Toast("Opened " + files[g.file])
+			}
+		}).Grow(1)
+	})
 }
 
 func (g *gallery) drawing(c *ui.Context) {
@@ -332,7 +422,7 @@ func (g *gallery) overlays(c *ui.Context) {
 }
 
 func main() {
-	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, now: time.Now()}
+	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, birthday: time.Date(1815, 12, 10, 0, 0, 0, 0, time.UTC), now: time.Now()}
 	mygo.App.WhenReady(func() {
 		g.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    "MyGo UI Gallery",

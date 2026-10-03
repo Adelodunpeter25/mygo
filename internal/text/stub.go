@@ -21,7 +21,7 @@ func (e *stubEngine) font(style Style) *Font {
 	return f
 }
 
-func (e *stubEngine) shape(text []rune, style Style, width float32, rtl, wholeWords bool) []shapedLine {
+func (e *stubEngine) shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
 	f := e.font(style)
 	run := shapedRun{font: f, end: len(text)}
 	for i := range text {

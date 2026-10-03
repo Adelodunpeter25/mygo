@@ -80,7 +80,10 @@ func place(e *Element, x, y float32) {
 // (0 for one line per paragraph).
 func (e *Element) textParams(width float32) text.Params {
 	ts := e.resolvedText()
-	p := text.Params{Text: e.text, Style: text.Style{Family: ts.family, Size: ts.size, Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight}, Width: width, MaxLines: e.maxLines}
+	p := text.Params{Text: e.text, Width: width, MaxLines: e.maxLines, Style: text.Style{
+		Family: ts.family, Size: ts.size, Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight,
+		LetterSpacing: ts.spacing, Features: ts.features,
+	}, Spans: e.textSpans()}
 	switch ts.align {
 	case Center:
 		p.Align = text.Center
@@ -93,7 +96,7 @@ func (e *Element) textParams(width float32) text.Params {
 // resolvedText merges the text styles of the element and its ancestors.
 func (e *Element) resolvedText() textStyle {
 	var out textStyle
-	for p := e; p != nil && out.set != setFamily|setSize|setWeight|setItalic|setColor|setLineHeight|setAlign|setUnderline|setStrike; p = p.parent {
+	for p := e; p != nil && out.set != setAll; p = p.parent {
 		t := &p.ts
 		take := t.set &^ out.set
 		if take&setFamily != 0 {
@@ -119,6 +122,12 @@ func (e *Element) resolvedText() textStyle {
 		}
 		if take&setUnderline != 0 {
 			out.underline = t.underline
+		}
+		if take&setSpacing != 0 {
+			out.spacing = t.spacing
+		}
+		if take&setFeatures != 0 {
+			out.features = t.features
 		}
 		if take&setStrike != 0 {
 			out.strike = t.strike
@@ -262,6 +271,11 @@ func layoutBox(e *Element, w, h float32) {
 	switch e.kind {
 	case kindText:
 		e.tl = textSystem().Layout(e.textParams(max(cw, 1)))
+		if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 {
+			// Selectable text hit-tests and selects in what it shows.
+			ed.layout = e.tl
+			ed.originX, ed.originY = e.pad[3]+e.borderW, e.pad[0]+e.borderW
+		}
 		return
 	case kindInput:
 		e.layoutInput(cw, ch)
@@ -300,6 +314,14 @@ type flexLine struct {
 	cross      float32
 }
 
+// flexScratch holds the items and lines of the flex containers being laid
+// out, a nested container's after its parent's, reusing their memory
+// frame after frame.
+type flexScratch struct {
+	items []flexItem
+	lines []flexLine
+}
+
 // flexLayout lays out the in-flow children in a content box cw×ch (inf
 // when unknown) and returns the size they take. With commit it gives them
 // their boxes (relative to e) and lays them out in turn.
@@ -313,7 +335,9 @@ func flexLayout(e *Element, cw, ch float32, commit bool) (usedW, usedH float32) 
 	if align == alignAuto {
 		align = Stretch
 	}
-	var items []flexItem
+	scratch := &e.c.rt.flex
+	firstItem, firstLine := len(scratch.items), len(scratch.lines)
+	defer func() { scratch.items, scratch.lines = scratch.items[:firstItem], scratch.lines[:firstLine] }()
 	for c := e.first; c != nil; c = c.next {
 		if c.flags&flagAbsolute != 0 {
 			continue
@@ -368,29 +392,31 @@ func flexLayout(e *Element, cw, ch float32, commit bool) (usedW, usedH float32) 
 			}
 		}
 		it.hyp = max(it.minMain, min(it.base, it.maxMain))
-		items = append(items, it)
+		// After the child's measures, which lay out containers in it.
+		scratch.items = append(scratch.items, it)
 	}
+	items := scratch.items[firstItem:]
 
 	// Break into lines.
-	var lines []flexLine
 	if len(items) > 0 {
 		cur := flexLine{}
 		for i := range items {
 			outer := items[i].hyp + items[i].marginMain
 			if e.wrap && finite(mainSize) && i > cur.start && cur.main+e.gap+outer > mainSize {
 				cur.end = i
-				lines = append(lines, cur)
+				scratch.lines = append(scratch.lines, cur)
 				cur = flexLine{start: i}
 			}
 			if i > cur.start {
 				cur.main += e.gap
 			}
 			cur.main += outer
-			items[i].line = len(lines)
+			items[i].line = len(scratch.lines) - firstLine
 		}
 		cur.end = len(items)
-		lines = append(lines, cur)
+		scratch.lines = append(scratch.lines, cur)
 	}
+	lines := scratch.lines[firstLine:]
 
 	// Resolve the flexible lengths of each line.
 	for li := range lines {

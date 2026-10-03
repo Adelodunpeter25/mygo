@@ -33,7 +33,7 @@ var (
 
 	// The types: the drawing area, its accessible, and the nodes', by
 	// the interfaces they implement.
-	areaType, rootType, nodeType, rangeType, textType, editableType uintptr
+	areaType, glAreaType, rootType, nodeType, rangeType, textType, editableType uintptr
 
 	gTypeRegisterStaticSimple func(parent uintptr, name *byte, classSize uint32, classInit ptr, instanceSize uint32, instanceInit ptr, flags uint32) uintptr
 	gTypeAddInterfaceStatic   func(instanceType, ifaceType uintptr, info *gInterfaceInfo)
@@ -52,6 +52,7 @@ var (
 
 	gtkWidgetAccessibleGetType      func() uintptr
 	gtkDrawingAreaGetType           func() uintptr
+	gtkGLAreaGetType                func() uintptr
 	gtkWidgetClassSetAccessibleType func(class ptr, t uintptr)
 	gtkWidgetClassSetAccessibleRole func(class ptr, role int32)
 	gtkAccessibleGetWidget          func(accessible ptr) ptr
@@ -78,6 +79,7 @@ var (
 	atkStates struct {
 		enabled, sensitive, visible, showing, focusable, focused, checkable, checked, indeterminate,
 		expandable, expanded, editable, readOnly, multiLine, singleLine, selectableText, defunct int32
+		selectable, selected int32
 	}
 
 	// The trees of surfaces, by the surface and by its accessible, and the
@@ -116,14 +118,19 @@ const (
 	gTypeInterfaceHeader = 16 // the functions of interfaces follow a GTypeInterface
 )
 
-// newSurfaceArea creates the widget of a surface: a drawing area that
-// assistive technology sees the content of when ATK allows it.
-func newSurfaceArea() ptr {
+// newSurfaceArea creates the widget of a surface, a GtkGLArea or a drawing
+// area, that assistive technology sees the content of when ATK allows it.
+func newSurfaceArea(gl bool) ptr {
 	accessOnce.Do(registerAccess)
-	if areaType == 0 {
-		return gtkDrawingAreaNew()
+	switch {
+	case gl && glAreaType != 0:
+		return gObjectNew(glAreaType, 0)
+	case gl:
+		return gtkGLAreaNew()
+	case areaType != 0:
+		return gObjectNew(areaType, 0)
 	}
-	return gObjectNew(areaType, 0)
+	return gtkDrawingAreaNew()
 }
 
 // slot returns the address of a function pointer in a C structure.
@@ -206,6 +213,10 @@ func registerAccess() {
 	implement(textType, atkTextGetType(), cbTextInit)
 	implement(editableType, atkEditableTextGetType(), cbEditableInit)
 	areaType = register(gtkDrawingAreaGetType(), "MyGoSurfaceArea", cbAreaClassInit)
+	// GtkGLArea came in GTK 3.16.
+	if bind(t, &gtkGLAreaGetType, "gtk_gl_area_get_type") {
+		glAreaType = register(gtkGLAreaGetType(), "MyGoSurfaceGLArea", cbAreaClassInit)
+	}
 }
 
 // loadAccessNames finds ATK's roles and states by name, which, unlike
@@ -227,6 +238,10 @@ func loadAccessNames() {
 		platform.RoleProgress: {"progress bar"}, platform.RoleTextField: {"entry"}, platform.RoleImage: {"image"},
 		platform.RoleList: {"list"}, platform.RoleScroll: {"scroll pane"}, platform.RoleDialog: {"dialog"},
 		platform.RolePopup: {"popup menu"}, platform.RoleTooltip: {"tool tip"}, platform.RolePopUpButton: {"combo box"},
+		platform.RoleTabList: {"page tab list"}, platform.RoleTab: {"page tab"}, platform.RoleSplitter: {"separator"},
+		platform.RoleStatus: {"notification", "status bar"}, platform.RoleTable: {"table"}, platform.RoleRow: {"table row"},
+		platform.RoleCell: {"table cell"}, platform.RoleColumnHeader: {"column header", "table column header"},
+		platform.RoleTree: {"tree", "tree table"}, platform.RoleTreeItem: {"tree item", "list item"},
 	} {
 		atkRoles[r] = role(names...)
 	}
@@ -237,6 +252,7 @@ func loadAccessNames() {
 		&st.indeterminate: "indeterminate", &st.expandable: "expandable", &st.expanded: "expanded",
 		&st.editable: "editable", &st.readOnly: "read-only", &st.multiLine: "multi-line",
 		&st.singleLine: "single-line", &st.selectableText: "selectable-text", &st.defunct: "defunct",
+		&st.selectable: "selectable", &st.selected: "selected",
 	} {
 		*p = atkStateTypeForName(cs(name))
 	}
@@ -488,6 +504,11 @@ func stateList(n platform.AccessNode, focused bool) []int32 {
 	switch n.Role {
 	case platform.RoleCheckBox, platform.RoleRadio, platform.RoleSwitch:
 		list = append(list, st.checkable)
+	case platform.RoleTab, platform.RoleTreeItem, platform.RoleRow:
+		list = append(list, st.selectable)
+		if n.States&platform.AccessChecked != 0 {
+			list = append(list, st.selected) // not checked
+		}
 	case platform.RolePopUpButton:
 		list = append(list, st.expandable)
 	case platform.RoleTextField:
@@ -503,7 +524,7 @@ func stateList(n platform.AccessNode, focused bool) []int32 {
 			list = append(list, st.singleLine)
 		}
 	}
-	if n.States&platform.AccessChecked != 0 {
+	if n.States&platform.AccessChecked != 0 && n.Role != platform.RoleTab && n.Role != platform.RoleTreeItem && n.Role != platform.RoleRow {
 		list = append(list, st.checked)
 	}
 	if n.States&platform.AccessMixed != 0 || n.Now < n.Min {

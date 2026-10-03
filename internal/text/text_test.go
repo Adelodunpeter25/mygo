@@ -2,6 +2,7 @@ package text
 
 import (
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -303,5 +304,211 @@ func TestRegisterFont(t *testing.T) {
 	system := font("")
 	if font("MyGo Test Sans") == system || font("Go") == system {
 		t.Error("text does not use the registered font")
+	}
+}
+
+// TestUIFamily gives system-ui the desktop's interface font where the
+// engine takes it, as Pango does: the family before fontconfig's default.
+func TestUIFamily(t *testing.T) {
+	s := newSystem()
+	if err := s.RegisterFont(goregular.TTF, "MyGo Test UI"); err != nil {
+		t.Fatal(err)
+	}
+	font := func(family string) *Font {
+		return s.Layout(Params{Text: "Hello", Style: Style{Size: 20, Family: family}}).Lines[0].Glyphs[0].Font
+	}
+	before := font("")
+	registered := font("MyGo Test UI")
+	s.SetUIFamily("MyGo Test UI")
+	_, takes := s.engine().(uiFamilySetter)
+	for _, family := range []string{"", "system-ui"} {
+		if got := font(family); takes && got != registered || !takes && got != before {
+			t.Errorf("%q after SetUIFamily: the font of the interface family %v, of the system %v", family, got == registered, got == before)
+		}
+	}
+	s.SetUIFamily("")
+	if font("") != before {
+		t.Error("system-ui keeps the interface family once it is unset")
+	}
+}
+
+func TestLetterSpacing(t *testing.T) {
+	s := newSystem()
+	width := func(spacing float32) float32 {
+		return s.Layout(Params{Text: "Hello", Style: Style{Size: 20, LetterSpacing: spacing}}).Width
+	}
+	plain, spaced, tight := width(0), width(4), width(-1)
+	// Four DIPs after each of the five letters, or of the four between
+	// them, as engines differ.
+	if d := spaced - plain; d < 4*4-0.5 || d > 4*5+0.5 {
+		t.Errorf("letter spacing of 4 widens Hello from %v to %v", plain, spaced)
+	}
+	if tight >= plain {
+		t.Errorf("negative letter spacing makes Hello %v wide, not less than %v", tight, plain)
+	}
+}
+
+func TestFontFeatures(t *testing.T) {
+	s := newSystem()
+	width := func(features string) float32 {
+		return s.Layout(Params{Text: "AVAVAVAVAV", Style: Style{Size: 40, Features: features}}).Width
+	}
+	// The system's interface font kerns A and V together.
+	kerned, plain := width(""), width("kern=0")
+	if plain <= kerned {
+		t.Errorf("AVAVAVAVAV is %v wide without kerning, %v with it", plain, kerned)
+	}
+	if w := width("kern=0, bogus, liga"); w != plain {
+		t.Errorf("a list with an invalid tag is %v wide, not %v", w, plain)
+	}
+}
+
+func TestParseFeatures(t *testing.T) {
+	got := features(" tnum, liga=0 ,salt=2,toolong, bad=x, ss01")
+	want := []feature{{[4]byte{'t', 'n', 'u', 'm'}, 1}, {[4]byte{'l', 'i', 'g', 'a'}, 0}, {[4]byte{'s', 'a', 'l', 't'}, 2}, {[4]byte{'s', 's', '0', '1'}, 1}}
+	if !slices.Equal(got, want) {
+		t.Errorf("features = %v, want %v", got, want)
+	}
+}
+
+func TestSpans(t *testing.T) {
+	s := newSystem()
+	if err := s.RegisterFont(goregular.TTF, "MyGo Test Span"); err != nil {
+		t.Fatal(err)
+	}
+	const text = "Small LARGE small"
+	lay := func(spans ...Span) *Layout {
+		return s.Layout(Params{Text: text, Style: Style{Size: 14}, Spans: EncodeSpans(spans)})
+	}
+	glyph := func(l *Layout, r int) Glyph {
+		for _, g := range l.Lines[0].Glyphs {
+			if g.Cluster == r {
+				return g
+			}
+		}
+		t.Fatalf("no glyph of rune %d", r)
+		return Glyph{}
+	}
+	plain := lay()
+	big := lay(Span{End: 6}, Span{End: 11, Size: 28, Weight: 700})
+	if glyph(big, 0).Size != 14 || glyph(big, 7).Size != 28 || glyph(big, 13).Size != 14 {
+		t.Errorf("glyph sizes %v, %v, %v", glyph(big, 0).Size, glyph(big, 7).Size, glyph(big, 13).Size)
+	}
+	if big.Height < plain.Height*1.5 || big.Width <= plain.Width {
+		t.Errorf("a span twice the size leaves the text %v×%v, from %v×%v", big.Width, big.Height, plain.Width, plain.Height)
+	}
+	reg := lay(Span{End: 6}, Span{End: 11, Family: "MyGo Test Span"})
+	want := s.Layout(Params{Text: "L", Style: Style{Size: 14, Family: "MyGo Test Span"}}).Lines[0].Glyphs[0].Font
+	if glyph(reg, 7).Font != want || glyph(reg, 0).Font == want {
+		t.Error("a span's family does not draw its runes, or draws the others")
+	}
+	// Truncated, the last line keeps its spans' styles.
+	cut := s.Layout(Params{Text: text, Style: Style{Size: 14}, Width: glyph(big, 9).X, MaxLines: 1, Spans: EncodeSpans([]Span{{End: 6}, {End: 11, Size: 28}})})
+	if !cut.Truncated || glyph(cut, 7).Size != 28 {
+		t.Errorf("truncated: %v, the large run's size %v", cut.Truncated, glyph(cut, 7).Size)
+	}
+}
+
+func TestEncodeSpans(t *testing.T) {
+	spans := []Span{{End: 3, Family: "A, B", Size: 1.5, Weight: 600, Italic: true, LetterSpacing: -0.5, Features: "tnum"}, {End: 9}}
+	if got := decodeSpans(EncodeSpans(spans)); !slices.Equal(got, spans) {
+		t.Errorf("decoded %+v, want %+v", got, spans)
+	}
+	if got := decodeSpans(EncodeSpans(spans)[:5]); len(got) != 0 {
+		t.Errorf("a cut encoding decodes to %+v", got)
+	}
+	// The spans of a paragraph, relative to it.
+	in := spansIn([]Span{{End: 3, Weight: 1}, {End: 8, Weight: 2}, {End: 12, Weight: 3}}, 5, 10)
+	if want := []Span{{End: 3, Weight: 2}, {End: 5, Weight: 3}}; !slices.Equal(in, want) {
+		t.Errorf("spansIn = %+v, want %+v", in, want)
+	}
+}
+
+func TestSpansAcrossParagraphs(t *testing.T) {
+	s := newSystem()
+	l := s.Layout(Params{Text: "ab\ncd", Style: Style{Size: 14}, Spans: EncodeSpans([]Span{{End: 1}, {End: 4, Size: 30}})})
+	sizes := map[int]float32{}
+	for _, line := range l.Lines {
+		for _, g := range line.Glyphs {
+			sizes[g.Cluster] = g.Size
+		}
+	}
+	if sizes[0] != 14 || sizes[1] != 30 || sizes[3] != 30 || sizes[4] != 14 {
+		t.Errorf("sizes by rune %v", sizes)
+	}
+}
+
+// TestDigitFeatures picks proportional or tabular figures of the system's
+// font, where it has both.
+func TestDigitFeatures(t *testing.T) {
+	s := newSystem()
+	width := func(features string) float32 {
+		return s.Layout(Params{Text: "1111111111", Style: Style{Size: 40, Features: features}}).Width
+	}
+	tabular, proportional := width("tnum"), width("pnum")
+	if tabular == proportional {
+		t.Skip("the system's font has digits of one kind")
+	}
+	if proportional >= tabular {
+		t.Errorf("proportional ones are %v wide, tabular ones %v", proportional, tabular)
+	}
+}
+
+// TestFontListFallback draws what the first family of a list lacks with
+// the next family that has it, before the system's choice.
+func TestFontListFallback(t *testing.T) {
+	second := map[string]string{"windows": "MS Gothic", "darwin": "Hiragino Mincho ProN", "linux": "Noto Serif CJK JP"}[runtime.GOOS]
+	s := newSystem()
+	if err := s.RegisterFont(goregular.TTF, "MyGo Latin"); err != nil {
+		t.Fatal(err)
+	}
+	// drawn tells fonts apart by what they draw, as engines may make a
+	// Font of one face for each family list.
+	drawn := func(text, family string, rune int) [4]float32 {
+		for _, g := range s.Layout(Params{Text: text, Style: Style{Size: 20, Family: family}}).Lines[0].Glyphs {
+			if g.Cluster == rune {
+				return [4]float32{float32(g.ID), g.Advance, g.Font.Ascent, g.Font.Descent}
+			}
+		}
+		return [4]float32{}
+	}
+	want := drawn("日", second, 0)
+	// Without a font that has it, engines draw a missing glyph: 0, or one
+	// of Pango's PANGO_GLYPH_UNKNOWN_FLAG.
+	if id := uint32(want[0]); id == 0 || id&0x10000000 != 0 || want == drawn("日", "MyGo Latin", 0) {
+		t.Skipf("%s is missing, or what the system falls back to", second)
+	}
+	list := "MyGo Latin, " + second
+	if got := drawn("A日", list, 1); got != want {
+		t.Errorf("日 in %q is not drawn with %s", list, second)
+	}
+	if drawn("A日", list, 0) != drawn("A", "MyGo Latin", 0) {
+		t.Errorf("A in %q is not drawn with MyGo Latin", list)
+	}
+}
+
+// TestFontsOfManySizes lets go of the fonts of sizes once they are many,
+// as with an animated size, and draws on.
+func TestFontsOfManySizes(t *testing.T) {
+	s := newSystem()
+	f, ok := s.engine().(fontForgetter)
+	if !ok {
+		t.Skip("the engine keeps no fonts")
+	}
+	for i := range 2 * maxFonts {
+		l := s.Layout(Params{Text: "Hi", Style: Style{Size: 10 + float32(i)/10}})
+		g := l.Lines[0].Glyphs[0]
+		img := s.Glyph(g.Font, g.ID, 1, 0)
+		if !img.OK && s.Full() {
+			s.MakeRoom() // as frames do once the atlas fills
+			img = s.Glyph(g.Font, g.ID, 1, 0)
+		}
+		if !img.OK {
+			t.Fatalf("no glyph at size %v", g.Size)
+		}
+		s.EndFrame()
+		if n := f.fontCount(); n > maxFonts {
+			t.Fatalf("%d fonts after a frame", n)
+		}
 	}
 }

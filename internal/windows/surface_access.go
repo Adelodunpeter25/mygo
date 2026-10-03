@@ -127,7 +127,9 @@ var uiaControlTypes = map[platform.AccessRole]int32{
 	platform.RoleCheckBox: 50002, platform.RoleRadio: 50013, platform.RoleSwitch: 50000, platform.RoleSlider: 50015,
 	platform.RoleProgress: 50012, platform.RoleTextField: 50004, platform.RoleImage: 50006, platform.RoleList: 50008,
 	platform.RoleScroll: 50033, platform.RoleDialog: 50033, platform.RolePopup: 50033, platform.RoleTooltip: 50022,
-	platform.RolePopUpButton: 50003,
+	platform.RolePopUpButton: 50003, platform.RoleTabList: 50018, platform.RoleTab: 50019, platform.RoleSplitter: 50038,
+	platform.RoleStatus: 50017, platform.RoleTable: 50036, platform.RoleRow: 50029, platform.RoleCell: 50025,
+	platform.RoleColumnHeader: 50035, platform.RoleTree: 50023, platform.RoleTreeItem: 50024,
 }
 
 // variant is VARIANT, with the value of the types used here.
@@ -210,20 +212,20 @@ func (e *uiaElement) supports(i int) bool {
 	switch i {
 	case ifaceInvoke:
 		switch n.Role {
-		case platform.RoleCheckBox, platform.RoleSwitch, platform.RoleRadio, platform.RolePopUpButton:
+		case platform.RoleCheckBox, platform.RoleSwitch, platform.RoleRadio, platform.RolePopUpButton, platform.RoleTab:
 			return false
 		}
 		return n.Actions&platform.ActionPress != 0
 	case ifaceToggle:
 		return n.Role == platform.RoleCheckBox || n.Role == platform.RoleSwitch
 	case ifaceSelectionItem:
-		return n.Role == platform.RoleRadio
+		return n.Role == platform.RoleRadio || n.Role == platform.RoleTab || n.Role == platform.RoleTreeItem || n.Role == platform.RoleRow
 	case ifaceRangeValue:
 		return n.Role == platform.RoleSlider || n.Role == platform.RoleProgress
 	case ifaceValue:
 		return n.Role == platform.RoleTextField || n.Role == platform.RolePopUpButton
 	case ifaceExpandCollapse:
-		return n.Role == platform.RolePopUpButton
+		return n.Role == platform.RolePopUpButton || n.Role == platform.RoleTreeItem
 	}
 	return false
 }

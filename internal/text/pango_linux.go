@@ -11,8 +11,10 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -136,6 +138,16 @@ var pangoLib struct {
 	layoutSetAutoDir          func(layout uintptr, auto int32)
 	layoutGetLineCount        func(layout uintptr) int32
 	layoutGetLineReadonly     func(layout uintptr, line int32) *pangoLayoutLine
+	layoutSetAttributes       func(layout, attrs uintptr)
+	attrListNew               func() uintptr
+	attrListUnref             func(list uintptr)
+	attrListInsert            func(list, attr uintptr)
+	attrLetterSpacingNew      func(spacing int32) uintptr
+	attrFontFeaturesNew       func(features string) uintptr // Pango 1.38
+	attrFamilyNew             func(family string) uintptr
+	attrSizeAbsoluteNew       func(size int32) uintptr
+	attrWeightNew             func(weight int32) uintptr
+	attrStyleNew              func(style int32) uintptr
 	fontMapConfigChanged      func(fontMap uintptr)
 	cairoFontOptionsCreate    func() uintptr
 	cairoFontOptionsDestroy   func(options uintptr)
@@ -231,6 +243,15 @@ func loadPango() error {
 	bind(pango, &l.layoutSetAutoDir, "pango_layout_set_auto_dir")
 	bind(pango, &l.layoutGetLineCount, "pango_layout_get_line_count")
 	bind(pango, &l.layoutGetLineReadonly, "pango_layout_get_line_readonly")
+	bind(pango, &l.layoutSetAttributes, "pango_layout_set_attributes")
+	bind(pango, &l.attrListNew, "pango_attr_list_new")
+	bind(pango, &l.attrListUnref, "pango_attr_list_unref")
+	bind(pango, &l.attrListInsert, "pango_attr_list_insert")
+	bind(pango, &l.attrLetterSpacingNew, "pango_attr_letter_spacing_new")
+	bind(pango, &l.attrFamilyNew, "pango_attr_family_new")
+	bind(pango, &l.attrSizeAbsoluteNew, "pango_attr_size_new_absolute")
+	bind(pango, &l.attrWeightNew, "pango_attr_weight_new")
+	bind(pango, &l.attrStyleNew, "pango_attr_style_new")
 	bind(cairo, &l.cairoFontOptionsCreate, "cairo_font_options_create")
 	bind(cairo, &l.cairoFontOptionsDestroy, "cairo_font_options_destroy")
 	bind(cairo, &l.cairoFontOptionsAntialias, "cairo_font_options_set_antialias")
@@ -258,6 +279,7 @@ func loadPango() error {
 	// Optional: Pango 1.44 and later, and what adding fonts needs.
 	missing = nil
 	bind(pango, &l.contextSetRoundPositions, "pango_context_set_round_glyph_positions")
+	bind(pango, &l.attrFontFeaturesNew, "pango_attr_font_features_new")
 	bind(pango, &l.metricsGetHeight, "pango_font_metrics_get_height")
 	bind(pango, &l.fontGetHBFont, "pango_font_get_hb_font")
 	if hb, err := open("libharfbuzz.so.0"); err == nil {
@@ -286,6 +308,20 @@ type pangoEngine struct {
 	scaled map[scaledKey]uintptr
 
 	registered map[string]bool // files of registered fonts
+	// uiFamily is the desktop's interface font, which system-ui stands for
+	// before fontconfig's default.
+	uiFamily string
+}
+
+func (e *pangoEngine) setUIFamily(family string) {
+	if family == e.uiFamily {
+		return
+	}
+	e.uiFamily = family
+	for _, d := range e.descs {
+		pangoLib.descFree(d)
+	}
+	clear(e.descs)
 }
 
 type scaledKey struct {
@@ -325,13 +361,18 @@ func newPango() (*pangoEngine, error) {
 }
 
 // pangoFamily returns the family list of a style for Pango, where
-// fontconfig knows the generic families.
-func pangoFamily(list string) string {
+// fontconfig knows the generic families, and system-ui is the desktop's
+// interface font, ui, when the app knows it.
+func pangoFamily(list, ui string) string {
 	var out []string
+	systemUI := []string{"system-ui", "sans-serif"}
+	if ui != "" {
+		systemUI = []string{ui, "system-ui", "sans-serif"}
+	}
 	for _, f := range familyList(list) {
 		switch generic(f) {
 		case "system-ui":
-			out = append(out, "system-ui", "sans-serif")
+			out = append(out, systemUI...)
 		case "":
 			out = append(out, f)
 		default:
@@ -339,7 +380,7 @@ func pangoFamily(list string) string {
 		}
 	}
 	if len(out) == 0 {
-		out = []string{"system-ui", "sans-serif"}
+		out = systemUI
 	}
 	return strings.Join(out, ",")
 }
@@ -357,7 +398,7 @@ func (e *pangoEngine) desc(style Style) uintptr {
 		clear(e.descs)
 	}
 	d := l.descNew()
-	l.descSetFamily(d, pangoFamily(key.Family))
+	l.descSetFamily(d, pangoFamily(key.Family, e.uiFamily))
 	l.descSetWeight(d, int32(key.Weight))
 	if key.Italic {
 		l.descSetStyle(d, pangoStyleItalic)
@@ -403,7 +444,7 @@ func (e *pangoEngine) fontOf(font uintptr) *Font {
 	return f
 }
 
-func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeWords bool) []shapedLine {
+func (e *pangoEngine) shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
 	if len(text) == 0 {
 		return nil
 	}
@@ -422,6 +463,10 @@ func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeW
 	l.layoutSetAutoDir(layout, int32(gFalse))
 	l.layoutSetFontDescription(layout, e.desc(style))
 	l.layoutSetText(layout, &utf8[0], int32(len(utf8)))
+	if attrs := e.attributes(style, spans, text); attrs != 0 {
+		l.layoutSetAttributes(layout, attrs)
+		l.attrListUnref(attrs)
+	}
 	if width > 0 {
 		l.layoutSetWidth(layout, int32(min(float64(width)*pangoScale, math.MaxInt32)))
 		if wholeWords {
@@ -471,6 +516,88 @@ func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeW
 		lines = append(lines, sl)
 	}
 	return lines
+}
+
+// attributes returns Pango's attributes of a style's letter spacing and
+// OpenType features, over the whole text, and of its spans' styles, over
+// their runes; 0 without any.
+func (e *pangoEngine) attributes(style Style, spans []Span, text []rune) uintptr {
+	l := &pangoLib
+	var list uintptr
+	// add inserts an attribute over bytes from to to, or the whole text
+	// when to is 0.
+	add := func(attr uintptr, from, to int) {
+		if attr == 0 {
+			return
+		}
+		if list == 0 {
+			list = l.attrListNew()
+		}
+		if to > 0 {
+			// PangoAttribute: start_index 8, end_index 12.
+			p := *(*unsafe.Pointer)(unsafe.Pointer(&attr))
+			*(*uint32)(unsafe.Add(p, 8)) = uint32(from)
+			*(*uint32)(unsafe.Add(p, 12)) = uint32(to)
+		}
+		l.attrListInsert(list, attr)
+	}
+	features := func(list string) uintptr {
+		fs := features(list)
+		if len(fs) == 0 || l.attrFontFeaturesNew == nil {
+			return 0
+		}
+		// HarfBuzz's syntax, which Pango hands over.
+		var b strings.Builder
+		for i, f := range fs {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.Write(f.tag[:])
+			b.WriteByte('=')
+			b.WriteString(strconv.FormatUint(uint64(f.value), 10))
+		}
+		return l.attrFontFeaturesNew(b.String())
+	}
+	spacing := func(v float32) uintptr {
+		if v == 0 {
+			return 0
+		}
+		return l.attrLetterSpacingNew(int32(math.Round(float64(v) * pangoScale)))
+	}
+	add(spacing(style.LetterSpacing), 0, 0)
+	add(features(style.Features), 0, 0)
+	if len(spans) == 0 {
+		return list
+	}
+	// The byte each rune starts at.
+	at := make([]int, len(text)+1)
+	for i, r := range text {
+		at[i+1] = at[i] + utf8.RuneLen(r)
+	}
+	from := 0
+	for _, sp := range spans {
+		to := max(from, min(sp.End, len(text)))
+		b0, b1 := at[from], at[to]
+		from = to
+		if b1 == b0 {
+			continue
+		}
+		if sp.Family != "" {
+			add(l.attrFamilyNew(pangoFamily(sp.Family, e.uiFamily)), b0, b1)
+		}
+		if sp.Size > 0 {
+			add(l.attrSizeAbsoluteNew(int32(math.Round(float64(sp.Size)*pangoScale))), b0, b1)
+		}
+		if sp.Weight > 0 {
+			add(l.attrWeightNew(int32(min(sp.Weight, 999))), b0, b1)
+		}
+		if sp.Italic {
+			add(l.attrStyleNew(pangoStyleItalic), b0, b1)
+		}
+		add(spacing(sp.LetterSpacing), b0, b1)
+		add(features(sp.Features), b0, b1)
+	}
+	return list
 }
 
 // space returns the glyph and advance, in Pango units, of a whitespace
@@ -689,4 +816,20 @@ func cString(p *byte) string {
 
 func xmlEscape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;").Replace(s)
+}
+
+func (e *pangoEngine) fontCount() int { return len(e.fonts) }
+
+// forgetFonts lets go of the Pango and cairo fonts of the Fonts made so
+// far.
+func (e *pangoEngine) forgetFonts() {
+	l := &pangoLib
+	for _, sf := range e.scaled {
+		l.cairoScaledFontDestroy(sf)
+	}
+	clear(e.scaled)
+	for _, f := range e.fonts {
+		l.gObjectUnref(f.native)
+	}
+	clear(e.fonts)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"image"
 	"image/png"
+	"math"
 
 	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/surface"
@@ -42,6 +43,7 @@ func (w *Window) attachContent() {
 			}
 		},
 		IsDark: func() bool { return backend().Theme().IsDark() },
+		UIFont: func() string { return backend().Theme().UIFont() },
 		TitleBar: func() platform.TitleBar {
 			if !w.hiddenTitleBar || w.native == nil {
 				return platform.TitleBar{}
@@ -50,8 +52,46 @@ func (w *Window) attachContent() {
 		},
 		OpenURL:    func(url string) { go Shell.OpenExternal(url) },
 		Invalidate: w.Invalidate,
+		PopupMenu: func(m *platform.Menu, x, y float64, chosen func(int)) {
+			pos := &platform.Point{X: int(math.Round(x)), Y: int(math.Round(y))}
+			menu := NewMenu(contentMenu(m, chosen))
+			// The menu waits for the user in a loop of its own: not in the
+			// event that asked for it, which the surface is handling.
+			postMain(func() {
+				if w.native != nil {
+					menu.popup(w, pos)
+				}
+			})
+		},
 	}
 	w.content.AttachContent(w.conn)
+}
+
+// contentMenu returns the items of a context menu of the Content, whose
+// Click passes the ID of the item to chosen.
+func contentMenu(m *platform.Menu, chosen func(int)) []*MenuItem {
+	items := make([]*MenuItem, 0, len(m.Items))
+	for _, p := range m.Items {
+		it := &MenuItem{Label: p.Label, Accelerator: p.Accelerator, Disabled: !p.Enabled, Hidden: !p.Visible, Checked: p.Checked}
+		switch p.Type {
+		case platform.MenuItemSeparator:
+			it.Type = MenuItemSeparator
+		case platform.MenuItemCheckbox:
+			it.Type = MenuItemCheckbox
+		case platform.MenuItemRadio:
+			it.Type = MenuItemRadio
+		case platform.MenuItemSubmenu:
+			it.Type = MenuItemSubmenu
+			it.Submenu = []*MenuItem{}
+			if p.Submenu != nil {
+				it.Submenu = contentMenu(p.Submenu, chosen)
+			}
+		}
+		id := p.ID
+		it.Click = func(*MenuItem, *Window) { chosen(id) }
+		items = append(items, it)
+	}
+	return items
 }
 
 // page runs fn with the native window, unless the window shows Content

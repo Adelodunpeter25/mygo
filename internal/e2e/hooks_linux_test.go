@@ -192,3 +192,29 @@ func accessPerform(w *mygo.Window, label, action, value string) (ok bool) {
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
 func compose(*mygo.Window, string, int, bool) bool             { return false }
+
+// glSurface returns how the native UI of a window draws ("opengl",
+// "memory", "cairo") and, for a GtkGLArea, the pixels of its framebuffer,
+// premultiplied BGRA rows from the top.
+func glSurface(w *mygo.Window) (how string, pix []byte, width, height int, supported bool) {
+	mygo.RunOnMain(func() { how, pix, width, height = linux.TestSurfaceGL(w.NativeHandle()) })
+	return how, pix, width, height, true
+}
+
+// rightClick clicks (x, y) in a window showing native UI with the
+// secondary button, through XTEST.
+func rightClick(w *mygo.Window, x, y float64) (ok bool) {
+	mygo.RunOnMain(func() { ok = linux.TestRightClickSurface(w.NativeHandle(), x, y) })
+	return ok
+}
+
+// popupMenus returns the labels of the items of the context menus shown.
+func popupMenus() (menus [][]string, supported bool) {
+	mygo.RunOnMain(func() { menus = linux.TestPopups() })
+	return menus, true
+}
+
+func choosePopupItem(label string) (ok bool) {
+	mygo.RunOnMain(func() { ok = linux.TestChoosePopupItem(label) })
+	return ok
+}

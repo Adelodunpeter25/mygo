@@ -79,3 +79,10 @@ const roleText, roleButton, roleCheckBox, roleTextField, roleSlider = "text", "b
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
 func compose(*mygo.Window, string, int, bool) bool             { return false }
+
+// Only Linux draws native UI in a GtkGLArea.
+func glSurface(*mygo.Window) (string, []byte, int, int, bool) { return "", nil, 0, 0, false }
+
+func rightClick(*mygo.Window, float64, float64) bool { return false }
+func popupMenus() ([][]string, bool)                 { return nil, false }
+func choosePopupItem(string) bool                    { return false }

@@ -350,7 +350,7 @@ func (b *Backend) PopupMenu(m *platform.Menu, pw platform.Window, pos *platform.
 		gtkWidgetDestroy(menu) // nowhere to show it
 		return
 	}
-	event, anchor := w.press.event, gtkWidgetGetWindow(w.web)
+	event, anchor := w.popupTrigger(), w.contentWindow()
 	const northWest = 1 // GDK_GRAVITY_NORTH_WEST
 	switch {
 	case pos != nil && anchor != 0:

@@ -3,9 +3,11 @@
 A window can show a user interface that MyGo draws itself instead of a web
 page. You write it in Go with package `ui`: there is no HTML, no JavaScript
 and no frontend build, and the window starts no webview, so it opens at
-once and uses little memory. MyGo draws it on the GPU, with Metal on macOS
-and Direct3D 11 on Windows; on Linux it draws on the CPU for now and hands
-the pixels to the window.
+once and uses little memory. MyGo draws it on the GPU, with Metal on macOS,
+Direct3D 11 on Windows and OpenGL on Linux.
+
+Native UI is experimental: the API of package `ui` may change in any
+release, without deprecations.
 
 ```go
 package main
@@ -45,8 +47,9 @@ func main() {
 }
 ```
 
-The gallery example tours what the toolkit does: `go run ./examples/gallery`
-in a clone of the repository.
+`mygo init -template native my-app` starts a project of native UI (see
+[the CLI](cli.md#mygo-init)). The gallery example tours what the toolkit
+does: `go run ./examples/gallery` in a clone of the repository.
 
 One app can have windows of both kinds. Native UI suits tools, settings,
 inspectors and utilities, and apps that must start instantly; a web page
@@ -153,16 +156,37 @@ ui.List(c, len(app.rows), 32, func(i int) {
 
 `ui.Text` shows text that wraps at the width it gets, and `ui.Textf` formats
 it. `FontSize`, `FontWeight`, `Bold`, `Italic`, `Font`, `LineHeight`,
-`TextColor`, `TextAlign`, `Underline` and `Strikethrough` style it, set on
-the text or on any element above it, whose texts inherit them. `SingleLine`
+`TextColor`, `TextAlign`, `Underline`, `Strikethrough`, `LetterSpacing`
+and `FontFeatures` style it, set on the text or on any element above it,
+whose texts inherit them. `FontFeatures` turns on OpenType features of the
+font by tag, or sets them with `tag=value`: `FontFeatures("tnum")` gives
+digits of one width for numbers that change, `FontFeatures("liga=0")`
+turns ligatures off. `SingleLine`
 keeps text on one line, cut with an ellipsis, and `MaxLines` limits it to a
-few.
+few. `Selectable` lets the user select a text with the pointer, Shift and
+the arrows, and copy it, as an error message or an identifier to paste
+elsewhere.
+
+`ui.RichText` mixes styles in one paragraph: each `ui.Span` sets what it
+changes (font, size, weight, italics, color, underline, strikethrough,
+letter spacing, features) over the style of the text, and the spans wrap
+together:
+
+```go
+ui.RichText(c,
+	ui.Span{Text: "Saved "},
+	ui.Span{Text: "report.pdf", Weight: 600},
+	ui.Span{Text: " to "},
+	ui.Span{Text: "Documents", Color: t.Accent, Underline: true},
+)
+```
 
 Text is laid out and drawn by the system's own text engine (DirectWrite on
 Windows, Core Text on macOS, Pango on Linux) in the system's font (Segoe UI,
-SF, the desktop's sans-serif), falling back to the system's fonts for other
-scripts and emoji as native apps do, with right-to-left text in its order. `Font("monospace")` picks the
-system's monospaced font, and `ui.RegisterFont` adds your own:
+SF, the desktop's interface font, as GTK apps have it), falling back to the
+system's fonts for other scripts and emoji as native apps do, with
+right-to-left text in its order. `Font("monospace")` picks the system's
+monospaced font, and `ui.RegisterFont` adds your own:
 
 ```go
 //go:embed Inter.ttf
@@ -176,7 +200,9 @@ func init() {
 ```
 
 Then `Font("Inter")` uses it, or set it for every element in the theme's
-`Font`.
+`Font`. A list of families, as `Font("Inter, Noto Sans JP")`, draws with
+the first the system or the app has, and what it lacks with the next that
+has it, before the system's own choice.
 
 ## Styling and themes
 
@@ -208,6 +234,12 @@ c.SetTheme(&t)
 | `Slider` | sets a `*float64` within a range, by dragging or with the arrow keys |
 | `Progress` | a bar filled from 0 to 1, or sliding across for a negative value, for work of unknown length |
 | `TextInput`, `TextArea` | edit a `*string` on one line or several, with selection, undo, the clipboard and input methods; `Placeholder`, `Password`, `Submitted` (Enter) and `Changed` |
+| `NumberInput` | edits a `*float64` within a range, typed or stepped with Up, Down and its buttons |
+| `DateInput` | edits a `*time.Time` with a calendar, by click or with the arrow keys and Page Up and Down |
+| `Tabs` | a row of tabs choosing a `*int`, by click or with the arrow keys |
+| `Split`, `SplitVertical` | two panes with a divider between them that the user drags, or moves with the arrow keys, to resize them; the first's size is a `*float32` |
+| `Table` | rows under a header of `TableColumn`s, built only while in view, choosing a `*int` by click or with Up and Down; a double click or Enter reports `Submitted` |
+| `Tree`, `TreeItem` | items that open and close, built inside the items they belong to, with the arrow keys moving between them; `Clicked` and `Selected` choose one |
 | `Image` | shows a `*ui.Bitmap` |
 | `Divider`, `Spacer` | a line, and space that grows |
 | `Scroll`, `ScrollHorizontal`, `List` | scroll containers, see [layout](#layout) |
@@ -287,6 +319,39 @@ func Disclosure(c *ui.Context, title string, body func()) {
   	zone.Border(2, t.Accent)
   }
   ```
+- **Context menus.** `ContextMenu` gives an element a menu of the system's,
+  which opens where the element is right-clicked (Control-clicked on
+  macOS), and below it when the menu key or Shift+F10 is pressed while it
+  or one inside it has the focus. The function builds the items when the
+  menu opens, and runs again in the frame after one was chosen, where its
+  `Chosen` reports it:
+
+  ```go
+  row.ContextMenu(func(m *ui.Menu) {
+  	if m.Item("Rename").Shortcut(0, ui.KeyF2).Chosen() {
+  		app.renaming = i
+  	}
+  	if m.Item("Pinned").Checked(note.pinned).Chosen() {
+  		note.pinned = !note.pinned
+  	}
+  	m.Submenu("Move to", func(m *ui.Menu) {
+  		for _, f := range app.folders {
+  			if m.Item(f.name).Chosen() {
+  				app.move(i, f)
+  			}
+  		}
+  	})
+  	m.Separator()
+  	if m.Item("Delete").Disabled(note.locked).Chosen() {
+  		app.delete(i)
+  	}
+  })
+  ```
+
+  The innermost element with a menu gets the click. Text inputs have the
+  editing commands of their platform's text fields, unless `ContextMenu`
+  gives them another menu. `Shortcut` only shows a key: handle it with
+  `Shortcut` on the context or an element.
 - **Tooltips.** `Tooltip("…")` shows a tip once the pointer rests on the
   element.
 - **Custom title bars.** In a `Frameless` window, `DragWindow` makes an
@@ -316,8 +381,10 @@ ui.Modal(c, &app.renaming, func() {
 })
 ```
 
-`ui.Overlay` builds elements above everything else, placed with `Absolute`
-in DIPs of the window. Native [dialogs](native.md#dialogs) work too: call
+`c.Toast("Saved")` shows a message near the bottom of the window for a few
+seconds, as the outcome of what the user just did; screen readers see it
+as a status. `ui.Overlay` builds elements above everything else, placed
+with `Absolute` in DIPs of the window. Native [dialogs](native.md#dialogs) work too: call
 them from a goroutine, so that the view does not wait for them.
 
 ## Accessibility
@@ -465,20 +532,25 @@ func TestCounter(t *testing.T) {
 }
 ```
 
-`tt.Image()` is the last frame, for snapshots, and `ui.Render` draws a view
-once at a given scale.
+`tt.RightClick` opens a context menu, which `tt.Menu` lists and
+`tt.ChooseMenuItem("Move to", "Archive")` chooses from. `tt.Image()` is the
+last frame, for snapshots, and `ui.Render` draws a view once at a given
+scale.
 
 ## Rendering
 
-MyGo draws on the GPU with Metal on macOS, and with Direct3D 11 on
-Windows, or with WARP, Windows' own software renderer, where no GPU driver
-works. A shader computes rounded rectangles, borders, gradients and
-shadows from the distance to their edges, so they stay sharp at any size
-and scale, and text comes from a glyph atlas that only uploads what
-changes.
+MyGo draws on the GPU with Metal on macOS, with Direct3D 11 on Windows,
+or with WARP, Windows' own software renderer, where no GPU driver works,
+and with OpenGL on Linux, in the GtkGLArea GTK shows. A shader computes
+rounded rectangles, borders, gradients and shadows from the distance to
+their edges, so they stay sharp at any size and scale, and text comes
+from a glyph atlas that only uploads what changes.
 
-On Linux it draws the same pixels on the CPU for now: a few milliseconds
-for a whole large window on a high-density display, and less than a tenth
-of one for what typically changes, such as a button under the pointer,
-since it redraws only that. Set `MYGO_GPU=0` to use the CPU renderer
-everywhere, for instance to compare.
+Where OpenGL would not run on a GPU, as in virtual machines or in WSL
+(where `GALLIUM_DRIVER=d3d12` gives Mesa the GPU), Linux draws the same
+pixels on the CPU: a few milliseconds for a whole large window on a
+high-density display, and less than a tenth of one for what typically
+changes, such as a button under the pointer, since it redraws only that.
+Set `MYGO_GPU=0` to use the CPU renderer everywhere, for instance to
+compare, and on Linux `MYGO_GPU=1` to draw with OpenGL even where it runs
+on the CPU.

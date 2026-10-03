@@ -63,17 +63,38 @@ func (p *Path) Circle(cx, cy, r float32) *Path {
 	return p.Close()
 }
 
-// flatten returns the path's subpaths as polylines in device pixels.
-func (p *Path) flatten(scale float32) (polys [][][2]float32, closed []bool) {
-	var cur [][2]float32
-	isClosed := false
-	var start, pen [2]float32
+// flatPath is a path flattened to polylines in device pixels: polyline i
+// holds pts[starts[i]:starts[i+1]], the last up to the end of pts. The
+// engine keeps one for the paths it paints, reusing its memory.
+type flatPath struct {
+	pts    [][2]float32
+	starts []int
+	closed []bool
+}
+
+func (f *flatPath) polys() int { return len(f.starts) }
+
+func (f *flatPath) poly(i int) [][2]float32 {
+	end := len(f.pts)
+	if i+1 < len(f.starts) {
+		end = f.starts[i+1]
+	}
+	return f.pts[f.starts[i]:end]
+}
+
+// flatten sets f to the path's subpaths as polylines in device pixels.
+func (p *Path) flatten(f *flatPath, scale float32) {
+	f.pts, f.starts, f.closed = f.pts[:0], f.starts[:0], f.closed[:0]
+	begin, isClosed := 0, false
+	var origin, pen [2]float32
 	flush := func() {
-		if len(cur) > 1 {
-			polys = append(polys, cur)
-			closed = append(closed, isClosed)
+		if len(f.pts)-begin > 1 {
+			f.starts = append(f.starts, begin)
+			f.closed = append(f.closed, isClosed)
+		} else {
+			f.pts = f.pts[:begin]
 		}
-		cur, isClosed = nil, false
+		begin, isClosed = len(f.pts), false
 	}
 	for _, c := range p.cmds {
 		pts := c.pts
@@ -84,17 +105,17 @@ func (p *Path) flatten(scale float32) (polys [][][2]float32, closed []bool) {
 		switch c.op {
 		case 0:
 			flush()
-			start, pen = pts[0], pts[0]
-			cur = append(cur, pen)
+			origin, pen = pts[0], pts[0]
+			f.pts = append(f.pts, pen)
 		case 1:
 			pen = pts[0]
-			cur = append(cur, pen)
+			f.pts = append(f.pts, pen)
 		case 2:
 			n := curveSteps(pen, pts[0], pts[1], pts[1])
 			for i := 1; i <= n; i++ {
 				t := float32(i) / float32(n)
 				u := 1 - t
-				cur = append(cur, [2]float32{u*u*pen[0] + 2*u*t*pts[0][0] + t*t*pts[1][0], u*u*pen[1] + 2*u*t*pts[0][1] + t*t*pts[1][1]})
+				f.pts = append(f.pts, [2]float32{u*u*pen[0] + 2*u*t*pts[0][0] + t*t*pts[1][0], u*u*pen[1] + 2*u*t*pts[0][1] + t*t*pts[1][1]})
 			}
 			pen = pts[1]
 		case 3:
@@ -103,19 +124,18 @@ func (p *Path) flatten(scale float32) (polys [][][2]float32, closed []bool) {
 				t := float32(i) / float32(n)
 				u := 1 - t
 				a, b, cc, d := u*u*u, 3*u*u*t, 3*u*t*t, t*t*t
-				cur = append(cur, [2]float32{a*pen[0] + b*pts[0][0] + cc*pts[1][0] + d*pts[2][0], a*pen[1] + b*pts[0][1] + cc*pts[1][1] + d*pts[2][1]})
+				f.pts = append(f.pts, [2]float32{a*pen[0] + b*pts[0][0] + cc*pts[1][0] + d*pts[2][0], a*pen[1] + b*pts[0][1] + cc*pts[1][1] + d*pts[2][1]})
 			}
 			pen = pts[2]
 		case 4:
-			if len(cur) > 0 {
+			if len(f.pts) > begin {
 				isClosed = true
 				flush()
-				pen = start
+				pen = origin
 			}
 		}
 	}
 	flush()
-	return polys, closed
 }
 
 func curveSteps(a, b, c, d [2]float32) int {
@@ -129,53 +149,75 @@ func dist(a, b [2]float32) float32 {
 
 var pathSeed = maphash.MakeSeed()
 
-// drawPath rasterizes polygons (device pixels) into a cached mask and
-// paints it with c.
-func (p *Painter) drawPath(polys [][][2]float32, key uint64, c Color) {
-	if len(polys) == 0 {
+// paths holds what the engine reuses to paint paths, frame after frame:
+// the flattened path, the job of drawing its mask, and the rasterizer
+// and pixels that draw it.
+type paths struct {
+	flat   flatPath
+	job    pathJob
+	raster vec.Rasterizer
+	pix    []byte
+}
+
+// pathJob is the mask drawPath asks the text system for, which draws it
+// with the engine's rasterizer and buffer when it is not cached.
+type pathJob struct {
+	f         *flatPath
+	w, h      int
+	hw        float32 // half the stroke's width; 0 fills
+	x0, y0    float32
+	rasterize func() (w, h int, pix []byte)
+}
+
+// drawPath paints a flattened path with c, from a mask cached by the shape:
+// filled (non-zero winding), or with width > 0 stroked that many pixels
+// wide with round joins and caps.
+func (p *Painter) drawPath(f *flatPath, width float32, c Color) {
+	if f.polys() == 0 {
 		return
 	}
+	hw := max(width, 0) / 2
 	minX, minY := float32(math.MaxFloat32), float32(math.MaxFloat32)
 	maxX, maxY := float32(-math.MaxFloat32), float32(-math.MaxFloat32)
-	for _, poly := range polys {
-		for _, pt := range poly {
-			minX, maxX = min(minX, pt[0]), max(maxX, pt[0])
-			minY, maxY = min(minY, pt[1]), max(maxY, pt[1])
-		}
+	for _, pt := range f.pts {
+		minX, maxX = min(minX, pt[0]), max(maxX, pt[0])
+		minY, maxY = min(minY, pt[1]), max(maxY, pt[1])
 	}
-	x0, y0 := float32(math.Floor(float64(minX))), float32(math.Floor(float64(minY)))
-	w, h := int(math.Ceil(float64(maxX-x0)))+1, int(math.Ceil(float64(maxY-y0)))+1
+	x0, y0 := float32(math.Floor(float64(minX-hw))), float32(math.Floor(float64(minY-hw)))
+	w, h := int(math.Ceil(float64(maxX+hw-x0)))+1, int(math.Ceil(float64(maxY+hw-y0)))+1
 	if w <= 0 || h <= 0 || w > 4096 || h > 4096 {
 		return
 	}
-	// The key covers the shape relative to the pixel grid.
+	// The key covers the shape relative to the pixel grid; a stroke's is
+	// its center line's, and its width.
+	key := uint64(1)
+	if hw > 0 {
+		key = 2 + uint64(math.Float32bits(hw))<<8
+	}
 	var buf [8]byte
 	var hs maphash.Hash
 	hs.SetSeed(pathSeed)
 	binary.LittleEndian.PutUint64(buf[:], key)
 	hs.Write(buf[:])
-	for _, poly := range polys {
-		for _, pt := range poly {
+	for i := range f.polys() {
+		for _, pt := range f.poly(i) {
 			binary.LittleEndian.PutUint32(buf[:4], math.Float32bits(round((pt[0]-x0)*4)))
 			binary.LittleEndian.PutUint32(buf[4:], math.Float32bits(round((pt[1]-y0)*4)))
 			hs.Write(buf[:])
 		}
-		hs.Write([]byte{0xff})
-	}
-	gi := p.rt.text.Mask(hs.Sum64(), func() (int, int, []byte) {
-		var z vec.Rasterizer
-		z.Reset(w, h)
-		for _, poly := range polys {
-			z.MoveTo(poly[0][0]-x0, poly[0][1]-y0)
-			for _, pt := range poly[1:] {
-				z.LineTo(pt[0]-x0, pt[1]-y0)
-			}
-			z.ClosePath()
+		end := byte(0xff)
+		if f.closed[i] {
+			end = 0xfe
 		}
-		pix := make([]byte, w*h)
-		z.Mask(pix, w)
-		return w, h, pix
-	})
+		hs.WriteByte(end)
+	}
+	j := &p.rt.paths.job
+	if j.rasterize == nil {
+		j.rasterize = p.rt.rasterizePath
+	}
+	j.f, j.w, j.h, j.hw, j.x0, j.y0 = f, w, h, hw, x0, y0
+	gi := p.rt.text.Mask(hs.Sum64(), j.rasterize)
+	j.f = nil
 	if !gi.OK {
 		return
 	}
@@ -184,22 +226,61 @@ func (p *Painter) drawPath(polys [][][2]float32, key uint64, c Color) {
 	p.s.Ops = append(p.s.Ops, scene.Op{Kind: scene.OpGlyphs, Start: start, End: start + 1})
 }
 
+// rasterizePath draws the mask of the path job, into memory the engine
+// reuses: the text system copies it into its atlas.
+func (rt *engine) rasterizePath() (int, int, []byte) {
+	j := &rt.paths.job
+	z := &rt.paths.raster
+	z.Reset(j.w, j.h)
+	if j.hw > 0 {
+		strokeInto(z, j.f, j.hw, j.x0, j.y0)
+	} else {
+		fillInto(z, j.f, j.x0, j.y0)
+	}
+	n := j.w * j.h
+	if cap(rt.paths.pix) < n {
+		rt.paths.pix = make([]byte, n)
+	}
+	pix := rt.paths.pix[:n]
+	z.Mask(pix, j.w)
+	return j.w, j.h, pix
+}
+
 // FillPath fills a path (non-zero winding).
 func (p *Painter) FillPath(path *Path, c Color) {
-	polys, _ := path.flatten(p.scale)
-	p.drawPath(polys, 1, c)
+	f := &p.rt.paths.flat
+	path.flatten(f, p.scale)
+	p.drawPath(f, 0, c)
 }
 
 // StrokePath draws the outline of a path, width DIPs wide, with round
 // joins and caps.
 func (p *Painter) StrokePath(path *Path, width float32, c Color) {
-	polys, closed := path.flatten(p.scale)
-	hw := width * p.scale / 2
-	var out [][][2]float32
-	for i, poly := range polys {
+	f := &p.rt.paths.flat
+	path.flatten(f, p.scale)
+	p.drawPath(f, width*p.scale, c)
+}
+
+func fillInto(z *vec.Rasterizer, f *flatPath, x0, y0 float32) {
+	for i := range f.polys() {
+		poly := f.poly(i)
+		z.MoveTo(poly[0][0]-x0, poly[0][1]-y0)
+		for _, pt := range poly[1:] {
+			z.LineTo(pt[0]-x0, pt[1]-y0)
+		}
+		z.ClosePath()
+	}
+}
+
+// strokeInto draws a stroke hw pixels to each side of a flattened path: a
+// quadrilateral per segment and a disc at every point, all counterclockwise
+// so that where they overlap they add up instead of cancelling.
+func strokeInto(z *vec.Rasterizer, f *flatPath, hw, x0, y0 float32) {
+	for i := range f.polys() {
+		poly := f.poly(i)
 		n := len(poly)
 		segs := n - 1
-		if closed[i] {
+		if f.closed[i] {
 			segs = n
 		}
 		for s := 0; s < segs; s++ {
@@ -210,37 +291,41 @@ func (p *Painter) StrokePath(path *Path, width float32, c Color) {
 				continue
 			}
 			nx, ny := -dy/l*hw, dx/l*hw
-			out = append(out, orient([][2]float32{{a[0] + nx, a[1] + ny}, {b[0] + nx, b[1] + ny}, {b[0] - nx, b[1] - ny}, {a[0] - nx, a[1] - ny}}))
+			polygon(z, [4][2]float32{
+				{a[0] + nx - x0, a[1] + ny - y0}, {b[0] + nx - x0, b[1] + ny - y0},
+				{b[0] - nx - x0, b[1] - ny - y0}, {a[0] - nx - x0, a[1] - ny - y0},
+			})
 		}
 		for _, pt := range poly {
-			out = append(out, disc(pt, hw))
+			disc(z, pt[0]-x0, pt[1]-y0, hw)
 		}
 	}
-	p.drawPath(out, 2+uint64(math.Float32bits(hw))<<8, c)
 }
 
-// orient makes a polygon counterclockwise, so that overlapping pieces of
-// a stroke add up instead of cancelling.
-func orient(poly [][2]float32) [][2]float32 {
+// polygon draws a quadrilateral counterclockwise.
+func polygon(z *vec.Rasterizer, q [4][2]float32) {
 	var area float32
-	for i := range poly {
-		a, b := poly[i], poly[(i+1)%len(poly)]
+	for i := range q {
+		a, b := q[i], q[(i+1)%4]
 		area += a[0]*b[1] - b[0]*a[1]
 	}
 	if area < 0 {
-		for i, j := 0, len(poly)-1; i < j; i, j = i+1, j-1 {
-			poly[i], poly[j] = poly[j], poly[i]
-		}
+		q[0], q[1], q[2], q[3] = q[3], q[2], q[1], q[0]
 	}
-	return poly
+	z.MoveTo(q[0][0], q[0][1])
+	z.LineTo(q[1][0], q[1][1])
+	z.LineTo(q[2][0], q[2][1])
+	z.LineTo(q[3][0], q[3][1])
+	z.ClosePath()
 }
 
-func disc(c [2]float32, r float32) [][2]float32 {
+// disc draws a circle of radius r as a polygon, counterclockwise.
+func disc(z *vec.Rasterizer, cx, cy, r float32) {
 	n := max(8, min(int(r*4), 32))
-	out := make([][2]float32, n)
-	for i := range out {
+	z.MoveTo(cx+r, cy)
+	for i := 1; i < n; i++ {
 		a := float64(i) * 2 * math.Pi / float64(n)
-		out[i] = [2]float32{c[0] + r*float32(math.Cos(a)), c[1] + r*float32(math.Sin(a))}
+		z.LineTo(cx+r*float32(math.Cos(a)), cy+r*float32(math.Sin(a)))
 	}
-	return out
+	z.ClosePath()
 }

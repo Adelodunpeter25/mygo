@@ -169,6 +169,10 @@ func release(obj *id) {
 // pool runs fn in an autorelease pool, which takes the objects Metal
 // returns without giving them to the caller.
 func pool(fn func()) {
+	// The pool belongs to the thread, which the goroutine must not leave
+	// before popping it.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	p, _, _ := purego.SyscallN(poolPush)
 	defer purego.SyscallN(poolPop, p)
 	fn()

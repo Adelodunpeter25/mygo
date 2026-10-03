@@ -24,4 +24,7 @@
 // among its siblings, or its Key.
 //
 // Tester runs views in tests, without a window.
+//
+// The package is experimental: its API may change in any release, without
+// deprecations.
 package ui

@@ -608,6 +608,8 @@ func (t theme) IsDark() bool {
 	defer t.b.mu.Unlock()
 	return t.b.theme == "dark"
 }
+func (theme) UIFont() string { return "" }
+
 func (t theme) SetSource(s string) {
 	t.b.mu.Lock()
 	t.b.theme = s

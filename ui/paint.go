@@ -91,7 +91,15 @@ func (p *Painter) element(e *Element) {
 		switch e.kind {
 		case kindText:
 			ts := e.resolvedText()
-			p.textLayout(e.tl, e.x+e.pad[3]+e.borderW, e.y+e.pad[0]+e.borderW, ts.color, ts)
+			ox, oy := e.x+e.pad[3]+e.borderW, e.y+e.pad[0]+e.borderW
+			if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 && e.Focused() {
+				if a, b := ed.selection(); a != b {
+					for _, r := range e.tl.Selection(a, b) {
+						p.Fill(Rect{ox + r.X, oy + r.Y, r.W, r.H}, e.c.theme.Selection, 0)
+					}
+				}
+			}
+			p.textLayout(e.tl, ox, oy, ts.color, ts, newSpanPaint(e.spans))
 		case kindImage:
 			p.image(e)
 		case kindInput:
@@ -163,7 +171,10 @@ func (p *Painter) popClip() {
 }
 
 // textLayout draws a text layout with its top-left corner at (x, y).
-func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textStyle) {
+// textLayout paints a laid out text from (x, y), in color, with the
+// underline or strikethrough of ts, and the colors and lines of the spans
+// of sp, if any.
+func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textStyle, sp *spanPaint) {
 	if l == nil {
 		return
 	}
@@ -184,14 +195,21 @@ func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textS
 			ix := float32(math.Floor(float64(pen)))
 			sub := int((pen - ix) * text.SubpixelSteps)
 			gi := sys.Glyph(g.Font, g.ID, s, sub)
+			glyphColor := color
+			if sp != nil {
+				glyphColor = sp.color(sp.at(g.Cluster), color)
+			}
 			if !gi.OK {
 				continue
 			}
 			p.s.Glyphs = append(p.s.Glyphs, scene.Glyph{
 				X: ix + gi.Left, Y: baseline + gi.Top, W: float32(gi.W), H: float32(gi.H),
 				U: gi.X, V: gi.Y, UW: gi.W, VH: gi.H,
-				Color: color.Alpha(p.opacity).scene(), Colored: gi.Colored,
+				Color: glyphColor.Alpha(p.opacity).scene(), Colored: gi.Colored,
 			})
+		}
+		if sp != nil {
+			sp.lines(p, line, x, baseline, color)
 		}
 		if ts.underline || ts.strike {
 			thick := max(round(ts.size*s/14), 1)
@@ -314,7 +332,7 @@ func (p *Painter) Line(x0, y0, x1, y1, width float32, c Color) {
 // Text draws a line of text with its top-left corner at (x, y).
 func (p *Painter) Text(x, y float32, s string, size float32, c Color) {
 	l := p.rt.text.Layout(text.Params{Text: s, Style: text.Style{Size: size}})
-	p.textLayout(l, x, y, c, textStyle{size: size})
+	p.textLayout(l, x, y, c, textStyle{size: size}, nil)
 }
 
 // Image draws a bitmap scaled to fit r.

@@ -230,6 +230,7 @@ c.SetTheme(&t)
 | `Progress` | a bar filled from 0 to 1, or sliding across for a negative value, for work of unknown length |
 | `TextInput`, `TextArea` | edit a `*string` on one line or several, with selection, undo, the clipboard and input methods; `Placeholder`, `Password`, `Submitted` (Enter) and `Changed` |
 | `NumberInput` | edits a `*float64` within a range, typed or stepped with Up, Down and its buttons |
+| `DateInput` | edits a `*time.Time` with a calendar, by click or with the arrow keys and Page Up and Down |
 | `Tabs` | a row of tabs choosing a `*int`, by click or with the arrow keys |
 | `Split`, `SplitVertical` | two panes with a divider between them that the user drags, or moves with the arrow keys, to resize them; the first's size is a `*float32` |
 | `Table` | rows under a header of `TableColumn`s, built only while in view, choosing a `*int` by click or with Up and Down; a double click or Enter reports `Submitted` |

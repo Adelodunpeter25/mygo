@@ -263,3 +263,49 @@ func TestTree(t *testing.T) {
 		t.Error("Left on src does not close it")
 	}
 }
+
+func TestDateInput(t *testing.T) {
+	date := time.Date(2026, 10, 3, 9, 30, 0, 0, time.UTC)
+	changes := 0
+	tt := NewTester(func(c *Context) {
+		Column(c).Padding(10).AlignItems(Start).Children(func() {
+			if DateInput(c, &date).Label("Due").Changed() {
+				changes++
+			}
+		})
+	}, 400, 420)
+	if !tt.HasText("2026-10-03") {
+		t.Fatalf("texts %q", tt.Texts())
+	}
+	if err := tt.Click("Due"); err != nil {
+		t.Fatal(err)
+	}
+	if !tt.HasText("October 2026") {
+		t.Fatalf("no calendar after a click: %q", tt.Texts())
+	}
+	if err := tt.Click("October 15, 2026"); err != nil {
+		t.Fatal(err)
+	}
+	if want := time.Date(2026, 10, 15, 9, 30, 0, 0, time.UTC); !date.Equal(want) || changes != 1 || tt.HasText("October 2026") {
+		t.Fatalf("a click on the 15th: %v, %d changes, calendar shown %v", date, changes, tt.HasText("October 2026"))
+	}
+	// From the keyboard: Enter opens it, the arrows and Page Down move,
+	// Enter chooses.
+	tt.Key(0, KeyEnter)
+	tt.Key(0, KeyRight)
+	tt.Key(0, KeyDown)
+	tt.Key(0, KeyPageDown)
+	tt.Key(0, KeyEnter)
+	if want := time.Date(2026, 11, 23, 9, 30, 0, 0, time.UTC); !date.Equal(want) {
+		t.Errorf("Right, Down and Page Down from the 15th chose %v", date)
+	}
+	tt.Click("Due")
+	tt.Click("Next month")
+	if !tt.HasText("December 2026") {
+		t.Errorf("Next month shows %q", tt.Texts())
+	}
+	tt.Key(0, KeyEscape)
+	if tt.HasText("December 2026") {
+		t.Error("Escape leaves the calendar open")
+	}
+}

@@ -22,29 +22,30 @@ type gallery struct {
 	win  *mygo.Window
 	page string
 
-	count   int
-	agree   bool
-	notify  bool
-	size    string
-	plan    string
-	volume  float64
-	name    string
-	email   string
-	bio     string
-	filter  string
-	picked  int
-	starred map[int]bool
-	tab     int
-	split   float32
-	copies  float64
-	file    int
-	tree    map[string]bool
-	leaf    string
-	dialog  bool
-	menu    bool
-	files   []string
-	now     time.Time
-	samples []float64
+	count    int
+	agree    bool
+	notify   bool
+	size     string
+	plan     string
+	volume   float64
+	name     string
+	email    string
+	bio      string
+	filter   string
+	picked   int
+	starred  map[int]bool
+	tab      int
+	split    float32
+	copies   float64
+	file     int
+	tree     map[string]bool
+	leaf     string
+	birthday time.Time
+	dialog   bool
+	menu     bool
+	files    []string
+	now      time.Time
+	samples  []float64
 }
 
 var pages = []string{"Overview", "Controls", "Text", "List", "Drawing", "Overlays"}
@@ -247,6 +248,8 @@ func (g *gallery) text(c *ui.Context) {
 		label("About you")
 		ui.TextArea(c, &g.bio).Placeholder("Multiple lines, with undo, selection and input methods.").Label("About you").Height(110)
 		ui.Textf(c, "%d characters", len([]rune(g.bio))).FontSize(12).TextColor(t.TextMuted)
+		label("Birthday")
+		ui.DateInput(c, &g.birthday).Label("Birthday")
 	})
 	card(c, "Typography", func() {
 		ui.Text(c, "Display 28").FontSize(28).Bold()
@@ -419,7 +422,7 @@ func (g *gallery) overlays(c *ui.Context) {
 }
 
 func main() {
-	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, now: time.Now()}
+	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, birthday: time.Date(1815, 12, 10, 0, 0, 0, 0, time.UTC), now: time.Now()}
 	mygo.App.WhenReady(func() {
 		g.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    "MyGo UI Gallery",

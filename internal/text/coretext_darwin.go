@@ -379,6 +379,10 @@ func nsWeight(w int) float64 {
 
 // systemFont returns the system font, or its monospaced kind, owned.
 func (e *coreText) systemFont(size float32, weight int, italic, mono bool) uintptr {
+	// An autorelease pool belongs to a thread, which the goroutine must
+	// not leave before popping it, or Objective-C crashes.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	pool := ct.poolPush()
 	defer ct.poolPop(pool)
 	sel := "systemFontOfSize:weight:"

@@ -199,7 +199,10 @@ func styleButton(c *Context, b *Element, primary bool) {
 	}
 }
 
-// Link creates a text that opens url in the browser when clicked.
+// Link creates a text that opens url in the browser when clicked, or
+// Enter while it has the focus. Inside a RichText it is a link within the
+// paragraph; give it an empty label and Children to style parts of its
+// text.
 func Link(c *Context, label, url string) *Element {
 	t := c.theme
 	e := Text(c, label).TextColor(t.Accent).Cursor(CursorPointer).Focusable()

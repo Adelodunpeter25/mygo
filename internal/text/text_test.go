@@ -486,3 +486,29 @@ func TestFontListFallback(t *testing.T) {
 		t.Errorf("A in %q is not drawn with MyGo Latin", list)
 	}
 }
+
+// TestFontsOfManySizes lets go of the fonts of sizes once they are many,
+// as with an animated size, and draws on.
+func TestFontsOfManySizes(t *testing.T) {
+	s := newSystem()
+	f, ok := s.engine().(fontForgetter)
+	if !ok {
+		t.Skip("the engine keeps no fonts")
+	}
+	for i := range 2 * maxFonts {
+		l := s.Layout(Params{Text: "Hi", Style: Style{Size: 10 + float32(i)/10}})
+		g := l.Lines[0].Glyphs[0]
+		img := s.Glyph(g.Font, g.ID, 1, 0)
+		if !img.OK && s.Full() {
+			s.MakeRoom() // as frames do once the atlas fills
+			img = s.Glyph(g.Font, g.ID, 1, 0)
+		}
+		if !img.OK {
+			t.Fatalf("no glyph at size %v", g.Size)
+		}
+		s.EndFrame()
+		if n := f.fontCount(); n > maxFonts {
+			t.Fatalf("%d fonts after a frame", n)
+		}
+	}
+}

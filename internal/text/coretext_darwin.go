@@ -880,3 +880,23 @@ func (e *coreText) register(data []byte, family string) error {
 	clear(e.primary)
 	return nil
 }
+
+func (e *coreText) fontCount() int {
+	n := 0
+	for _, fs := range e.fonts {
+		n += len(fs)
+	}
+	return n
+}
+
+// forgetFonts lets go of the CTFonts of the Fonts made so far, and of
+// what is known of them; the fonts of styles stay.
+func (e *coreText) forgetFonts() {
+	for _, fs := range e.fonts {
+		for _, f := range fs {
+			ct.release(f.native)
+		}
+	}
+	clear(e.fonts)
+	clear(e.color)
+}

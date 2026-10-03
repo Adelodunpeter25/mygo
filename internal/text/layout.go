@@ -322,6 +322,17 @@ func (s *System) engine() engine {
 	return s.eng
 }
 
+// maxFonts is how many Fonts an engine keeps before the System lets them
+// go: a Font holds a font of the system at one size.
+const maxFonts = 512
+
+// fontForgetter is an engine whose Fonts the System lets go of when they
+// are many.
+type fontForgetter interface {
+	fontCount() int
+	forgetFonts()
+}
+
 // uiFamilySetter is an engine that takes the family of the desktop's
 // interface font from the app.
 type uiFamilySetter interface{ setUIFamily(family string) }
@@ -380,6 +391,17 @@ func (s *System) EndFrame() {
 		}
 	}
 	s.frame++
+	if f, ok := s.eng.(fontForgetter); ok && f.fontCount() > maxFonts {
+		// Fonts pile up with sizes, as with animated ones: let them all go,
+		// with what refers to them. The atlas takes back the room of their
+		// glyphs as it makes room; the next frame lays out and draws its
+		// text anew.
+		clear(s.layouts)
+		clear(s.fonts)
+		clear(s.glyphs)
+		f.forgetFonts()
+		return
+	}
 	if s.frame%64 != 0 && len(s.layouts) < 4096 {
 		return
 	}

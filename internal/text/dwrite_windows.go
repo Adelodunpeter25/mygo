@@ -1147,3 +1147,14 @@ func familyNames(coll uintptr) []string {
 	}
 	return names
 }
+
+func (e *dwrite) fontCount() int { return len(e.fonts) }
+
+// forgetFonts lets go of the faces of the Fonts made so far; the faces of
+// the families stay.
+func (e *dwrite) forgetFonts() {
+	for _, f := range e.fonts {
+		release(f.native)
+	}
+	clear(e.fonts)
+}

@@ -817,3 +817,19 @@ func cString(p *byte) string {
 func xmlEscape(s string) string {
 	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;").Replace(s)
 }
+
+func (e *pangoEngine) fontCount() int { return len(e.fonts) }
+
+// forgetFonts lets go of the Pango and cairo fonts of the Fonts made so
+// far.
+func (e *pangoEngine) forgetFonts() {
+	l := &pangoLib
+	for _, sf := range e.scaled {
+		l.cairoScaledFontDestroy(sf)
+	}
+	clear(e.scaled)
+	for _, f := range e.fonts {
+		l.gObjectUnref(f.native)
+	}
+	clear(e.fonts)
+}

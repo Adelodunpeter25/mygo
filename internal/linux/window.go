@@ -103,8 +103,10 @@ func (b *Backend) window(data ptr) *window {
 }
 
 func (b *Backend) NewWindow(o *platform.WindowOptions, h platform.WindowHandler) (platform.Window, error) {
-	if !o.Surface && errWebKit != nil {
-		return nil, errWebKit
+	if !o.Surface {
+		if err := webKit(); err != nil {
+			return nil, err
+		}
 	}
 	b.nextID++
 	w := &window{b: b, id: b.nextID, h: h, opts: o, autoHideMenu: o.AutoHideMenu}

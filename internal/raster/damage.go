@@ -3,6 +3,7 @@ package raster
 import (
 	"image"
 	"math"
+	"runtime"
 
 	"github.com/egoist/mygo/internal/scene"
 )
@@ -16,8 +17,9 @@ import (
 // that changed, clipped as they draw. Glyphs whose pixels changed in an
 // atlas, and images whose pixels changed, count as changed.
 type Renderer struct {
-	// Image holds the last scene drawn.
+	// Image holds the last scene drawn, in mem.
 	Image Image
+	mem   *pixels
 
 	r      renderer
 	valid  bool
@@ -63,7 +65,7 @@ func (m *atlasMark) set(a *scene.Atlas) {
 // change once Render returns.
 func (r *Renderer) Render(s *scene.Scene) []image.Rectangle {
 	if r.whole(s) {
-		r.Image.Resize(s.Width, s.Height)
+		r.resize(s.Width, s.Height)
 		r.damage = append(r.damage[:0], image.Rect(0, 0, s.Width, s.Height))
 	}
 	for _, d := range r.damage {
@@ -71,6 +73,30 @@ func (r *Renderer) Render(s *scene.Scene) []image.Rectangle {
 	}
 	r.remember(s)
 	return r.damage
+}
+
+// pixels is the memory of a Renderer's image (allocPixels).
+type pixels struct {
+	b       []byte
+	mapped  bool
+	cleanup runtime.Cleanup
+}
+
+// resize makes Image w×h, reusing its memory when it can.
+func (r *Renderer) resize(w, h int) {
+	n := 4 * w * h
+	if r.mem == nil || len(r.mem.b) < n {
+		r.mem.free()
+		r.mem = allocPixels(n)
+	}
+	r.Image = Image{W: w, H: h, Stride: 4 * w, Pix: r.mem.b[:n]}
+}
+
+// Release frees the image and what Render remembers: the next Render
+// draws everything. Image must not be used meanwhile.
+func (r *Renderer) Release() {
+	r.mem.free()
+	*r = Renderer{}
 }
 
 // Changes returns how many pixels Render would draw for s.

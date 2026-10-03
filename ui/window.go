@@ -194,7 +194,7 @@ func (h *windowHost) dropCPUFrame(now time.Time) {
 	if h.gpuSinceCPU.IsZero() {
 		h.gpuSinceCPU = now
 	} else if now.Sub(h.gpuSinceCPU) > time.Second && h.soft.Image.Pix != nil {
-		h.soft = raster.Renderer{}
+		h.soft.Release()
 	}
 }
 
@@ -294,6 +294,7 @@ func (h *windowHost) capture() (int, int, []byte) {
 
 func (h *windowHost) detach() {
 	h.rt.close()
+	h.soft.Release()
 	if h.gpu != nil {
 		h.gpu.Release()
 		h.gpu = nil

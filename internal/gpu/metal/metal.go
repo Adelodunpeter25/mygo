@@ -312,6 +312,8 @@ type Renderer struct {
 	pixelFrames uint64
 	pixelDamage [pixelHistory][]image.Rectangle
 	shown       map[uint32]uint64
+	// lastGPU is when the GPU last drew a frame.
+	lastGPU time.Time
 
 	// lastRender is when the last frame drew; trimTimer trims the
 	// drawables once none has for a while, armed until it fires, and
@@ -663,6 +665,7 @@ func (r *Renderer) render(s *scene.Scene) error {
 	send(drawable, "present")
 	r.last = send(cb, "retain")
 	r.lastRender = time.Now()
+	r.lastGPU = r.lastRender
 	r.armTrim()
 	// Forget the textures of images no frame drew for a while.
 	if r.frame%120 == 0 {
@@ -756,7 +759,25 @@ func (r *Renderer) presentPixels(pix []byte, stride, width, height int, scale fl
 	send(drawable, "present")
 	r.lastRender = time.Now()
 	r.armTrim()
+	if !r.lastGPU.IsZero() && r.lastRender.Sub(r.lastGPU) > trimAfter {
+		r.releaseTextures()
+		r.lastGPU = time.Time{}
+	}
 	return nil
+}
+
+// releaseTextures frees what only frames the GPU draws use, once only
+// frames drawn in memory came for a while; the next frame the GPU draws
+// makes them again, uploading the atlases whole.
+func (r *Renderer) releaseTextures() {
+	release(&r.mask.tex)
+	release(&r.color.tex)
+	for key, t := range r.images {
+		release(&t.tex)
+		delete(r.images, key)
+	}
+	release(&r.instBuf)
+	r.instCap = 0
 }
 
 // changedSince returns what changed between the frame drawn in memory the
@@ -893,14 +914,8 @@ func (r *Renderer) Release() {
 			send(tx, "commit")
 			release(&r.layer)
 		}
-		for key, t := range r.images {
-			release(&t.tex)
-			delete(r.images, key)
-		}
-		release(&r.mask.tex)
-		release(&r.color.tex)
+		r.releaseTextures()
 		release(&r.empty)
-		release(&r.instBuf)
 		release(&r.sampler)
 		release(&r.pipeline)
 		release(&r.queue)

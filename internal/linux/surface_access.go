@@ -79,6 +79,7 @@ var (
 	atkStates struct {
 		enabled, sensitive, visible, showing, focusable, focused, checkable, checked, indeterminate,
 		expandable, expanded, editable, readOnly, multiLine, singleLine, selectableText, defunct int32
+		selectable, selected int32
 	}
 
 	// The trees of surfaces, by the surface and by its accessible, and the
@@ -237,6 +238,10 @@ func loadAccessNames() {
 		platform.RoleProgress: {"progress bar"}, platform.RoleTextField: {"entry"}, platform.RoleImage: {"image"},
 		platform.RoleList: {"list"}, platform.RoleScroll: {"scroll pane"}, platform.RoleDialog: {"dialog"},
 		platform.RolePopup: {"popup menu"}, platform.RoleTooltip: {"tool tip"}, platform.RolePopUpButton: {"combo box"},
+		platform.RoleTabList: {"page tab list"}, platform.RoleTab: {"page tab"}, platform.RoleSplitter: {"separator"},
+		platform.RoleStatus: {"notification", "status bar"}, platform.RoleTable: {"table"}, platform.RoleRow: {"table row"},
+		platform.RoleCell: {"table cell"}, platform.RoleColumnHeader: {"column header", "table column header"},
+		platform.RoleTree: {"tree", "tree table"}, platform.RoleTreeItem: {"tree item", "list item"},
 	} {
 		atkRoles[r] = role(names...)
 	}
@@ -247,6 +252,7 @@ func loadAccessNames() {
 		&st.indeterminate: "indeterminate", &st.expandable: "expandable", &st.expanded: "expanded",
 		&st.editable: "editable", &st.readOnly: "read-only", &st.multiLine: "multi-line",
 		&st.singleLine: "single-line", &st.selectableText: "selectable-text", &st.defunct: "defunct",
+		&st.selectable: "selectable", &st.selected: "selected",
 	} {
 		*p = atkStateTypeForName(cs(name))
 	}
@@ -498,6 +504,11 @@ func stateList(n platform.AccessNode, focused bool) []int32 {
 	switch n.Role {
 	case platform.RoleCheckBox, platform.RoleRadio, platform.RoleSwitch:
 		list = append(list, st.checkable)
+	case platform.RoleTab, platform.RoleTreeItem:
+		list = append(list, st.selectable)
+		if n.States&platform.AccessChecked != 0 {
+			list = append(list, st.selected) // not checked
+		}
 	case platform.RolePopUpButton:
 		list = append(list, st.expandable)
 	case platform.RoleTextField:
@@ -513,7 +524,7 @@ func stateList(n platform.AccessNode, focused bool) []int32 {
 			list = append(list, st.singleLine)
 		}
 	}
-	if n.States&platform.AccessChecked != 0 {
+	if n.States&platform.AccessChecked != 0 && n.Role != platform.RoleTab && n.Role != platform.RoleTreeItem {
 		list = append(list, st.checked)
 	}
 	if n.States&platform.AccessMixed != 0 || n.Now < n.Min {

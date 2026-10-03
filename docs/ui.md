@@ -229,6 +229,9 @@ c.SetTheme(&t)
 | `Slider` | sets a `*float64` within a range, by dragging or with the arrow keys |
 | `Progress` | a bar filled from 0 to 1, or sliding across for a negative value, for work of unknown length |
 | `TextInput`, `TextArea` | edit a `*string` on one line or several, with selection, undo, the clipboard and input methods; `Placeholder`, `Password`, `Submitted` (Enter) and `Changed` |
+| `NumberInput` | edits a `*float64` within a range, typed or stepped with Up, Down and its buttons |
+| `Tabs` | a row of tabs choosing a `*int`, by click or with the arrow keys |
+| `Split`, `SplitVertical` | two panes with a divider between them that the user drags, or moves with the arrow keys, to resize them; the first's size is a `*float32` |
 | `Image` | shows a `*ui.Bitmap` |
 | `Divider`, `Spacer` | a line, and space that grows |
 | `Scroll`, `ScrollHorizontal`, `List` | scroll containers, see [layout](#layout) |
@@ -370,8 +373,10 @@ ui.Modal(c, &app.renaming, func() {
 })
 ```
 
-`ui.Overlay` builds elements above everything else, placed with `Absolute`
-in DIPs of the window. Native [dialogs](native.md#dialogs) work too: call
+`c.Toast("Saved")` shows a message near the bottom of the window for a few
+seconds, as the outcome of what the user just did; screen readers see it
+as a status. `ui.Overlay` builds elements above everything else, placed
+with `Absolute` in DIPs of the window. Native [dialogs](native.md#dialogs) work too: call
 them from a goroutine, so that the view does not wait for them.
 
 ## Accessibility

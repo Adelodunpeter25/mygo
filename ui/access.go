@@ -41,6 +41,16 @@ const (
 	RolePopup
 	RoleTooltip
 	RolePopUpButton
+	RoleTabList
+	RoleTab
+	RoleSplitter
+	RoleStatus
+	RoleTable
+	RoleRow
+	RoleCell
+	RoleColumnHeader
+	RoleTree
+	RoleTreeItem
 )
 
 // Role sets what the element is to assistive technology, for an element
@@ -81,7 +91,8 @@ func (e *Element) accessRole() (platform.AccessRole, bool) {
 // as their name, rather than showing it as elements of its own.
 func leafRole(r platform.AccessRole) bool {
 	switch r {
-	case platform.RoleGroup, platform.RoleList, platform.RoleScroll, platform.RoleDialog, platform.RolePopup:
+	case platform.RoleGroup, platform.RoleList, platform.RoleScroll, platform.RoleDialog, platform.RolePopup,
+		platform.RoleTabList, platform.RoleTable, platform.RoleRow, platform.RoleCell, platform.RoleTree:
 		return false
 	}
 	return true

@@ -51,23 +51,33 @@ func postNote(obj id, name string) {
 
 // accessRoles are the roles and subroles of node roles.
 var accessRoles = map[platform.AccessRole][2]string{
-	platform.RoleGroup:       {"AXGroup", ""},
-	platform.RoleText:        {"AXStaticText", ""},
-	platform.RoleButton:      {"AXButton", ""},
-	platform.RoleLink:        {"AXLink", ""},
-	platform.RoleCheckBox:    {"AXCheckBox", ""},
-	platform.RoleRadio:       {"AXRadioButton", ""},
-	platform.RoleSwitch:      {"AXCheckBox", "AXSwitch"},
-	platform.RoleSlider:      {"AXSlider", ""},
-	platform.RoleProgress:    {"AXProgressIndicator", ""},
-	platform.RoleTextField:   {"AXTextField", ""},
-	platform.RoleImage:       {"AXImage", ""},
-	platform.RoleList:        {"AXList", ""},
-	platform.RoleScroll:      {"AXScrollArea", ""},
-	platform.RoleDialog:      {"AXGroup", "AXDialog"},
-	platform.RolePopup:       {"AXPopover", ""},
-	platform.RoleTooltip:     {"AXHelpTag", ""},
-	platform.RolePopUpButton: {"AXPopUpButton", ""},
+	platform.RoleGroup:        {"AXGroup", ""},
+	platform.RoleText:         {"AXStaticText", ""},
+	platform.RoleButton:       {"AXButton", ""},
+	platform.RoleLink:         {"AXLink", ""},
+	platform.RoleCheckBox:     {"AXCheckBox", ""},
+	platform.RoleRadio:        {"AXRadioButton", ""},
+	platform.RoleSwitch:       {"AXCheckBox", "AXSwitch"},
+	platform.RoleSlider:       {"AXSlider", ""},
+	platform.RoleProgress:     {"AXProgressIndicator", ""},
+	platform.RoleTextField:    {"AXTextField", ""},
+	platform.RoleImage:        {"AXImage", ""},
+	platform.RoleList:         {"AXList", ""},
+	platform.RoleScroll:       {"AXScrollArea", ""},
+	platform.RoleDialog:       {"AXGroup", "AXDialog"},
+	platform.RolePopup:        {"AXPopover", ""},
+	platform.RoleTooltip:      {"AXHelpTag", ""},
+	platform.RolePopUpButton:  {"AXPopUpButton", ""},
+	platform.RoleTabList:      {"AXTabGroup", ""},
+	platform.RoleTab:          {"AXRadioButton", "AXTabButton"},
+	platform.RoleSplitter:     {"AXSplitter", ""},
+	platform.RoleStatus:       {"AXGroup", "AXApplicationStatus"},
+	platform.RoleTable:        {"AXTable", ""},
+	platform.RoleRow:          {"AXRow", ""},
+	platform.RoleCell:         {"AXCell", ""},
+	platform.RoleColumnHeader: {"AXCell", ""},
+	platform.RoleTree:         {"AXOutline", ""},
+	platform.RoleTreeItem:     {"AXRow", "AXOutlineRow"},
 }
 
 func roleOf(n platform.AccessNode) (role, subrole string) {
@@ -87,7 +97,7 @@ func roleOf(n platform.AccessNode) (role, subrole string) {
 // titled reports whether elements of a role show their name as a title.
 func titled(r platform.AccessRole) bool {
 	switch r {
-	case platform.RoleButton, platform.RoleLink, platform.RoleCheckBox, platform.RoleRadio, platform.RoleSwitch, platform.RolePopUpButton:
+	case platform.RoleButton, platform.RoleLink, platform.RoleCheckBox, platform.RoleRadio, platform.RoleSwitch, platform.RolePopUpButton, platform.RoleTab:
 		return true
 	}
 	return false
@@ -97,7 +107,7 @@ func titled(r platform.AccessRole) bool {
 // toggles and ranges, a string for texts.
 func valueOf(n platform.AccessNode) id {
 	switch n.Role {
-	case platform.RoleCheckBox, platform.RoleRadio, platform.RoleSwitch:
+	case platform.RoleCheckBox, platform.RoleRadio, platform.RoleSwitch, platform.RoleTab:
 		v := 0
 		switch {
 		case n.States&platform.AccessMixed != 0:

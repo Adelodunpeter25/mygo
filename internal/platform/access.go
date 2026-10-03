@@ -56,6 +56,16 @@ const (
 	RolePopup
 	RoleTooltip
 	RolePopUpButton
+	RoleTabList
+	RoleTab
+	RoleSplitter
+	RoleStatus
+	RoleTable
+	RoleRow
+	RoleCell
+	RoleColumnHeader
+	RoleTree
+	RoleTreeItem
 )
 
 // AccessStates are the states of an element of an AccessTree.

@@ -34,6 +34,9 @@ type gallery struct {
 	filter  string
 	picked  int
 	starred map[int]bool
+	tab     int
+	split   float32
+	copies  float64
 	dialog  bool
 	menu    bool
 	files   []string
@@ -195,15 +198,35 @@ func (g *gallery) controls(c *ui.Context) {
 		})
 		ui.Progress(c, g.volume/100)
 		ui.Progress(c, -1)
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "Copies")
+			ui.NumberInput(c, &g.copies, 1, 99, 1).Label("Copies")
+		})
 	})
 	card(c, "Buttons", func() {
 		ui.Row(c).Gap(8).Wrap().Children(func() {
-			ui.PrimaryButton(c, "Save")
+			if ui.PrimaryButton(c, "Save").Clicked() {
+				c.Toast("Saved")
+			}
 			ui.Button(c, "Cancel")
 			ui.Button(c, "Disabled").Disabled(true)
 			ui.Link(c, "Open mygo.dev", "https://github.com/egoist/mygo")
 		})
 		ui.Text(c, "Tab moves the focus; Enter or Space presses the focused button.").TextColor(t.TextMuted)
+	})
+	card(c, "Tabs and panes", func() {
+		ui.Tabs(c, &g.tab, "Files", "Search", "History")
+		ui.Split(c, &g.split, func() {
+			ui.Column(c).Fill().Padding(10).Gap(6).Background(t.Surface).Children(func() {
+				for _, name := range [][]string{{"main.go", "go.mod", "README.md"}, {"Results"}, {"Yesterday", "Last week"}}[g.tab] {
+					ui.Text(c, name).SingleLine()
+				}
+			})
+		}, func() {
+			ui.Column(c).Fill().Padding(10).Children(func() {
+				ui.Text(c, "Drag the divider, or focus it and press the arrows.").TextColor(t.TextMuted)
+			})
+		}).Height(140).Border(1, t.Border).Radius(t.Radius).Clip()
 	})
 }
 
@@ -356,7 +379,7 @@ func (g *gallery) overlays(c *ui.Context) {
 }
 
 func main() {
-	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, now: time.Now()}
+	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, now: time.Now()}
 	mygo.App.WhenReady(func() {
 		g.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    "MyGo UI Gallery",

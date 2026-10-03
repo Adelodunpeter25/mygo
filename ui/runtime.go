@@ -64,6 +64,8 @@ type engine struct {
 	windowFocused      bool
 	keys               []keyEvent
 	menu               menuState
+	toasts             []toast
+	nextToast          uint64
 
 	consumed  bool
 	animating bool
@@ -172,6 +174,7 @@ func (rt *engine) runFrame() {
 		rt.nextRegs = rt.nextRegs[:0]
 		rt.c.reset(now, w, h)
 		rt.view(&rt.c)
+		rt.buildToasts(&rt.c)
 		if ov := rt.c.overlay; ov != nil {
 			rt.c.root.add(ov)
 		}

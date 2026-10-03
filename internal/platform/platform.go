@@ -612,6 +612,9 @@ type Theme interface {
 	IsDark() bool
 	// SetSource is "system", "light" or "dark".
 	SetSource(source string)
+	// UIFont returns the family of the desktop's interface font where the
+	// system's text stack does not know it, as on Linux, else "".
+	UIFont() string
 }
 
 // PDFOptions configures Window.PrintToPDF; lengths are in inches.

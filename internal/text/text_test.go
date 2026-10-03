@@ -305,3 +305,28 @@ func TestRegisterFont(t *testing.T) {
 		t.Error("text does not use the registered font")
 	}
 }
+
+// TestUIFamily gives system-ui the desktop's interface font where the
+// engine takes it, as Pango does: the family before fontconfig's default.
+func TestUIFamily(t *testing.T) {
+	s := newSystem()
+	if err := s.RegisterFont(goregular.TTF, "MyGo Test UI"); err != nil {
+		t.Fatal(err)
+	}
+	font := func(family string) *Font {
+		return s.Layout(Params{Text: "Hello", Style: Style{Size: 20, Family: family}}).Lines[0].Glyphs[0].Font
+	}
+	before := font("")
+	registered := font("MyGo Test UI")
+	s.SetUIFamily("MyGo Test UI")
+	_, takes := s.engine().(uiFamilySetter)
+	for _, family := range []string{"", "system-ui"} {
+		if got := font(family); takes && got != registered || !takes && got != before {
+			t.Errorf("%q after SetUIFamily: the font of the interface family %v, of the system %v", family, got == registered, got == before)
+		}
+	}
+	s.SetUIFamily("")
+	if font("") != before {
+		t.Error("system-ui keeps the interface family once it is unset")
+	}
+}

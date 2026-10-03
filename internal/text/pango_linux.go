@@ -286,6 +286,20 @@ type pangoEngine struct {
 	scaled map[scaledKey]uintptr
 
 	registered map[string]bool // files of registered fonts
+	// uiFamily is the desktop's interface font, which system-ui stands for
+	// before fontconfig's default.
+	uiFamily string
+}
+
+func (e *pangoEngine) setUIFamily(family string) {
+	if family == e.uiFamily {
+		return
+	}
+	e.uiFamily = family
+	for _, d := range e.descs {
+		pangoLib.descFree(d)
+	}
+	clear(e.descs)
 }
 
 type scaledKey struct {
@@ -325,13 +339,18 @@ func newPango() (*pangoEngine, error) {
 }
 
 // pangoFamily returns the family list of a style for Pango, where
-// fontconfig knows the generic families.
-func pangoFamily(list string) string {
+// fontconfig knows the generic families, and system-ui is the desktop's
+// interface font, ui, when the app knows it.
+func pangoFamily(list, ui string) string {
 	var out []string
+	systemUI := []string{"system-ui", "sans-serif"}
+	if ui != "" {
+		systemUI = []string{ui, "system-ui", "sans-serif"}
+	}
 	for _, f := range familyList(list) {
 		switch generic(f) {
 		case "system-ui":
-			out = append(out, "system-ui", "sans-serif")
+			out = append(out, systemUI...)
 		case "":
 			out = append(out, f)
 		default:
@@ -339,7 +358,7 @@ func pangoFamily(list string) string {
 		}
 	}
 	if len(out) == 0 {
-		out = []string{"system-ui", "sans-serif"}
+		out = systemUI
 	}
 	return strings.Join(out, ",")
 }
@@ -357,7 +376,7 @@ func (e *pangoEngine) desc(style Style) uintptr {
 		clear(e.descs)
 	}
 	d := l.descNew()
-	l.descSetFamily(d, pangoFamily(key.Family))
+	l.descSetFamily(d, pangoFamily(key.Family, e.uiFamily))
 	l.descSetWeight(d, int32(key.Weight))
 	if key.Italic {
 		l.descSetStyle(d, pangoStyleItalic)

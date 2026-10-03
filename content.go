@@ -43,6 +43,7 @@ func (w *Window) attachContent() {
 			}
 		},
 		IsDark: func() bool { return backend().Theme().IsDark() },
+		UIFont: func() string { return backend().Theme().UIFont() },
 		TitleBar: func() platform.TitleBar {
 			if !w.hiddenTitleBar || w.native == nil {
 				return platform.TitleBar{}

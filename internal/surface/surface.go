@@ -20,6 +20,9 @@ type Conn struct {
 	TitleBarDoubleClicked func()
 	// IsDark reports the system's dark appearance.
 	IsDark func() bool
+	// UIFont returns the family of the desktop's interface font where the
+	// system's text stack does not know it (Linux), else "".
+	UIFont func() string
 	// TitleBar returns the room the window controls take in a window with
 	// a hidden title bar, zero in other windows.
 	TitleBar func() platform.TitleBar

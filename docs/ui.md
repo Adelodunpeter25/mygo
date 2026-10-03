@@ -160,9 +160,10 @@ few.
 
 Text is laid out and drawn by the system's own text engine (DirectWrite on
 Windows, Core Text on macOS, Pango on Linux) in the system's font (Segoe UI,
-SF, the desktop's sans-serif), falling back to the system's fonts for other
-scripts and emoji as native apps do, with right-to-left text in its order. `Font("monospace")` picks the
-system's monospaced font, and `ui.RegisterFont` adds your own:
+SF, the desktop's interface font, as GTK apps have it), falling back to the
+system's fonts for other scripts and emoji as native apps do, with
+right-to-left text in its order. `Font("monospace")` picks the system's
+monospaced font, and `ui.RegisterFont` adds your own:
 
 ```go
 //go:embed Inter.ttf

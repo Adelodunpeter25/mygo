@@ -119,6 +119,9 @@ type Glyph struct {
 type System struct {
 	mu  sync.Mutex
 	eng engine
+	// uiFamily is the family system-ui stands for where the engine does
+	// not know it (SetUIFamily).
+	uiFamily string
 	// fonts caches the font of each style.
 	fonts map[Style]*Font
 
@@ -170,8 +173,34 @@ func Shared() *System { return shared() }
 func (s *System) engine() engine {
 	if s.eng == nil {
 		s.eng = newEngine()
+		if u, ok := s.eng.(uiFamilySetter); ok {
+			u.setUIFamily(s.uiFamily)
+		}
 	}
 	return s.eng
+}
+
+// uiFamilySetter is an engine that takes the family of the desktop's
+// interface font from the app.
+type uiFamilySetter interface{ setUIFamily(family string) }
+
+// SetUIFamily sets the family "system-ui" stands for where the system's
+// text stack does not know the desktop's interface font, as Pango on
+// Linux, which finds fontconfig's default sans-serif. Other engines ignore
+// it.
+func (s *System) SetUIFamily(family string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if family == s.uiFamily {
+		return
+	}
+	s.uiFamily = family
+	// An engine started already takes it now, and forgets what it found.
+	if u, ok := s.eng.(uiFamilySetter); ok {
+		u.setUIFamily(family)
+		clear(s.fonts)
+		clear(s.layouts)
+	}
 }
 
 // RegisterFont adds a TrueType or OpenType font (or collection) to the

@@ -955,6 +955,10 @@ either.
   An atlas logs the rectangles that change, so renderers upload only those.
   DirectWrite methods taking floats are called through purego, which sets
   the floating point registers that `syscall` leaves alone on ARM64.
+  Fontconfig knows no desktop's interface font, so on Linux `system-ui`
+  stands for the family of GTK's `gtk-font-name` first
+  (`platform.Theme.UIFont`, which package ui gives `SetUIFamily` with each
+  change of the appearance).
 - **Atlas lifetime.** A mask drawn for the first time goes to the
   transient zone at the bottom of the atlas, which the next frame frees,
   and moves to the lasting zone at the top once another frame draws it, so

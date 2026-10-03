@@ -41,10 +41,15 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	rt := newRuntime(v.view, h)
 	h.rt = rt
 	conn.Event = h.event
-	conn.ThemeChanged = rt.themeChanged
+	conn.ThemeChanged = func() {
+		// The interface font is part of the appearance.
+		h.uiFont()
+		rt.themeChanged()
+	}
 	conn.TitleBarChanged = rt.requestFrame
 	conn.Capture = h.capture
 	conn.Detach = h.detach
+	h.uiFont()
 	// Load the fonts while the window shows up.
 	go text.Shared().Preload()
 	conn.Surface.RequestFrame()
@@ -232,6 +237,14 @@ func (h *windowHost) detach() {
 }
 
 func (h *windowHost) requestFrame() { h.conn.Surface.RequestFrame() }
+
+// uiFont gives system-ui the desktop's interface font where the text
+// system does not know it.
+func (h *windowHost) uiFont() {
+	if h.conn.UIFont != nil {
+		text.Shared().SetUIFamily(h.conn.UIFont())
+	}
+}
 
 func (h *windowHost) setCursor(c Cursor) { h.conn.Surface.SetCursor(platform.Cursor(c)) }
 

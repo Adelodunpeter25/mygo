@@ -59,6 +59,7 @@ var (
 	cbSurfaceMotion, cbSurfaceLeave, cbSurfaceScroll, cbSurfaceKey  ptr
 	cbSurfaceFocusIn, cbSurfaceFocusOut, cbSurfaceScale, cbIMCommit ptr
 	cbIMPreedit, cbIMPreeditEnd, cbSurfaceRender, cbAreaContext     ptr
+	cbSurfaceUnrealize                                              ptr
 	surfaceCursors                                                  = map[platform.Cursor]ptr{}
 )
 
@@ -145,7 +146,11 @@ func (s *surface) newArea(gl bool) {
 	s.area = newSurfaceArea(gl)
 	if gl {
 		gtkGLAreaSetRequiredVersion(s.area, 3, 3)
-		gtkGLAreaSetHasAlpha(s.area, true)
+		// Only transparent windows show what is behind them. With an alpha
+		// channel GTK keeps the area in a texture it blends, rather than in
+		// a renderbuffer it copies, which took a small window 50 MB more of
+		// the GPU's memory, and an animation half as much CPU again.
+		gtkGLAreaSetHasAlpha(s.area, s.w.opts.Transparent)
 		connect(s.area, "create-context", cbAreaContext, data)
 		connect(s.area, "render", cbSurfaceRender, data)
 	}
@@ -160,6 +165,7 @@ func (s *surface) newArea(gl bool) {
 	connect(s.area, "draw", cbSurfaceDraw, data)
 	connect(s.area, "size-allocate", cbSurfaceSize, data)
 	connect(s.area, "realize", cbSurfaceRealize, data)
+	connect(s.area, "unrealize", cbSurfaceUnrealize, data)
 	connect(s.area, "notify::scale-factor", cbSurfaceScale, data)
 	connect(s.area, "button-press-event", cbSurfaceButton, data)
 	connect(s.area, "button-release-event", cbSurfaceButton, data)
@@ -429,6 +435,13 @@ func initSurfaceCallbacks() {
 		if s := b().surfaceOf(data); s != nil {
 			s.send(platform.SurfaceEvent{Kind: platform.SurfaceResize})
 			gtkWidgetQueueDraw(s.area)
+		}
+	})
+	// Input methods let go of the GdkWindow before it goes, as GtkEntry
+	// has them: fcitx5's disconnects from it.
+	cbSurfaceUnrealize = purego.NewCallback(func(widget, data ptr) {
+		if s := b().surfaceOf(data); s != nil {
+			gtkIMContextSetClientWindow(s.im, 0)
 		}
 	})
 	cbSurfaceRealize = purego.NewCallback(func(widget, data ptr) {

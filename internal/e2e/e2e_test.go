@@ -1773,6 +1773,12 @@ func TestClick(t *testing.T) {
 	}
 }
 
+// deviceScale returns the device pixels per DIP of the display w shows on.
+func deviceScale(w *mygo.Window) float64 {
+	b := w.Bounds()
+	return mygo.Screen.DisplayNearestPoint(mygo.Point{X: b.X + b.Width/2, Y: b.Y + b.Height/2}).ScaleFactor
+}
+
 // TestContentWindowInputMethod checks that input methods see the text
 // around the caret of native UI and replace what was typed, as macOS's
 // press and hold does with the letter it accents.
@@ -1792,7 +1798,9 @@ func TestContentWindowInputMethod(t *testing.T) {
 	if _, _, ok := inputClient(w); !ok {
 		t.Skip("input method automation not available on this platform")
 	}
-	click(w, 300, 36) // after the text
+	if !click(w, 300, 36) { // after the text
+		t.Skip("click automation not available on this platform")
+	}
 	eventually(t, "the caret after the text", func() bool {
 		sel, doc, _ := inputClient(w)
 		return sel == [2]int{4, 0} && doc == "cafe"
@@ -1984,9 +1992,10 @@ func TestContentWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := img.Bounds()
+	// The capture has the window's device pixels, which a tiling window
+	// manager may have made more than 400 DIPs wide.
+	s := deviceScale(w)
 	at := func(x, y float64) color.RGBA {
-		// The capture has the window's device pixels.
-		s := float64(b.Dx()) / 400
 		return color.RGBAModel.Convert(img.At(b.Min.X+int(x*s), b.Min.Y+int(y*s))).(color.RGBA)
 	}
 	if c := at(100, 50); c.R < 200 || c.B > 60 {
@@ -2003,7 +2012,6 @@ func TestContentWindow(t *testing.T) {
 				t.Fatalf("the surface draws %q, not with OpenGL", how)
 			}
 			bgra := func(x, y float64) []byte {
-				s := float64(gw) / 400
 				return pix[(int(y*s)*gw+int(x*s))*4:][:4]
 			}
 			if c := bgra(100, 50); c[2] < 200 || c[0] > 60 {

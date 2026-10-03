@@ -80,7 +80,8 @@ before changing anything under `internal/`.
 │                       websocket; and updater, the update window, Go only
 ├── ui/                 native UI: views, layout, widgets, text editing, Tester
 ├── cmd/mygo/           the CLI: init, generate, dev, build, doctor
-├── examples/           hello, todo, frameless, native, vibrancy, gallery (native UI)
+├── examples/           hello, todo, frameless, native, vibrancy; counter-native
+│                       and gallery (native UI)
 ├── docs/               the user guides, the official plugins' pages
 │                       (plugins/), and this architecture guide
 └── website/            the website, with these docs: TanStack Start, prerendered
@@ -218,10 +219,12 @@ purego gives three primitives, used everywhere:
 ### Linux (`internal/linux`)
 
 - `ffi.go` `dlopen`s GLib, GObject, GIO, GDK, GTK 3, cairo, GdkPixbuf
-  and, when installed, AppIndicator, then WebKitGTK 4.1 (4.0),
-  JavaScriptCore and libsoup 3 (2.4), which only windows showing web pages
-  need: without them, `errWebKit` says what to install when such a window
-  is created, and windows showing native UI work. Symbols from newer
+  and, when installed, AppIndicator. WebKitGTK 4.1 (4.0), JavaScriptCore
+  and libsoup 3 (2.4), which only windows showing web pages need, load
+  with the first such window (`webKit`), or to clear browsing data: an app
+  that shows only native UI never maps them and the 75 or so libraries
+  they bring, some 7 MB and 20 ms of startup. Without them, `errWebKit`
+  says what to install when such a window is created. Symbols from newer
   WebKitGTK versions are bound optionally and feature-detected
   (`webkitWebViewCallAsyncJavascriptFunction != nil`).
 - Signals are connected with `g_signal_connect_data`, passing the window id as

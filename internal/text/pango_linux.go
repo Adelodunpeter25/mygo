@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -143,6 +144,10 @@ var pangoLib struct {
 	attrListInsert            func(list, attr uintptr)
 	attrLetterSpacingNew      func(spacing int32) uintptr
 	attrFontFeaturesNew       func(features string) uintptr // Pango 1.38
+	attrFamilyNew             func(family string) uintptr
+	attrSizeAbsoluteNew       func(size int32) uintptr
+	attrWeightNew             func(weight int32) uintptr
+	attrStyleNew              func(style int32) uintptr
 	fontMapConfigChanged      func(fontMap uintptr)
 	cairoFontOptionsCreate    func() uintptr
 	cairoFontOptionsDestroy   func(options uintptr)
@@ -243,6 +248,10 @@ func loadPango() error {
 	bind(pango, &l.attrListUnref, "pango_attr_list_unref")
 	bind(pango, &l.attrListInsert, "pango_attr_list_insert")
 	bind(pango, &l.attrLetterSpacingNew, "pango_attr_letter_spacing_new")
+	bind(pango, &l.attrFamilyNew, "pango_attr_family_new")
+	bind(pango, &l.attrSizeAbsoluteNew, "pango_attr_size_new_absolute")
+	bind(pango, &l.attrWeightNew, "pango_attr_weight_new")
+	bind(pango, &l.attrStyleNew, "pango_attr_style_new")
 	bind(cairo, &l.cairoFontOptionsCreate, "cairo_font_options_create")
 	bind(cairo, &l.cairoFontOptionsDestroy, "cairo_font_options_destroy")
 	bind(cairo, &l.cairoFontOptionsAntialias, "cairo_font_options_set_antialias")
@@ -435,7 +444,7 @@ func (e *pangoEngine) fontOf(font uintptr) *Font {
 	return f
 }
 
-func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeWords bool) []shapedLine {
+func (e *pangoEngine) shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
 	if len(text) == 0 {
 		return nil
 	}
@@ -454,7 +463,7 @@ func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeW
 	l.layoutSetAutoDir(layout, int32(gFalse))
 	l.layoutSetFontDescription(layout, e.desc(style))
 	l.layoutSetText(layout, &utf8[0], int32(len(utf8)))
-	if attrs := attributes(style); attrs != 0 {
+	if attrs := e.attributes(style, spans, text); attrs != 0 {
 		l.layoutSetAttributes(layout, attrs)
 		l.attrListUnref(attrs)
 	}
@@ -510,21 +519,33 @@ func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeW
 }
 
 // attributes returns Pango's attributes of a style's letter spacing and
-// OpenType features, over the whole text, or 0 without either.
-func attributes(style Style) uintptr {
+// OpenType features, over the whole text, and of its spans' styles, over
+// their runes; 0 without any.
+func (e *pangoEngine) attributes(style Style, spans []Span, text []rune) uintptr {
 	l := &pangoLib
-	fs := features(style.Features)
-	if l.attrFontFeaturesNew == nil {
-		fs = nil
+	var list uintptr
+	// add inserts an attribute over bytes from to to, or the whole text
+	// when to is 0.
+	add := func(attr uintptr, from, to int) {
+		if attr == 0 {
+			return
+		}
+		if list == 0 {
+			list = l.attrListNew()
+		}
+		if to > 0 {
+			// PangoAttribute: start_index 8, end_index 12.
+			p := *(*unsafe.Pointer)(unsafe.Pointer(&attr))
+			*(*uint32)(unsafe.Add(p, 8)) = uint32(from)
+			*(*uint32)(unsafe.Add(p, 12)) = uint32(to)
+		}
+		l.attrListInsert(list, attr)
 	}
-	if style.LetterSpacing == 0 && len(fs) == 0 {
-		return 0
-	}
-	list := l.attrListNew()
-	if style.LetterSpacing != 0 {
-		l.attrListInsert(list, l.attrLetterSpacingNew(int32(math.Round(float64(style.LetterSpacing)*pangoScale))))
-	}
-	if len(fs) > 0 {
+	features := func(list string) uintptr {
+		fs := features(list)
+		if len(fs) == 0 || l.attrFontFeaturesNew == nil {
+			return 0
+		}
 		// HarfBuzz's syntax, which Pango hands over.
 		var b strings.Builder
 		for i, f := range fs {
@@ -535,7 +556,46 @@ func attributes(style Style) uintptr {
 			b.WriteByte('=')
 			b.WriteString(strconv.FormatUint(uint64(f.value), 10))
 		}
-		l.attrListInsert(list, l.attrFontFeaturesNew(b.String()))
+		return l.attrFontFeaturesNew(b.String())
+	}
+	spacing := func(v float32) uintptr {
+		if v == 0 {
+			return 0
+		}
+		return l.attrLetterSpacingNew(int32(math.Round(float64(v) * pangoScale)))
+	}
+	add(spacing(style.LetterSpacing), 0, 0)
+	add(features(style.Features), 0, 0)
+	if len(spans) == 0 {
+		return list
+	}
+	// The byte each rune starts at.
+	at := make([]int, len(text)+1)
+	for i, r := range text {
+		at[i+1] = at[i] + utf8.RuneLen(r)
+	}
+	from := 0
+	for _, sp := range spans {
+		to := max(from, min(sp.End, len(text)))
+		b0, b1 := at[from], at[to]
+		from = to
+		if b1 == b0 {
+			continue
+		}
+		if sp.Family != "" {
+			add(l.attrFamilyNew(pangoFamily(sp.Family, e.uiFamily)), b0, b1)
+		}
+		if sp.Size > 0 {
+			add(l.attrSizeAbsoluteNew(int32(math.Round(float64(sp.Size)*pangoScale))), b0, b1)
+		}
+		if sp.Weight > 0 {
+			add(l.attrWeightNew(int32(min(sp.Weight, 999))), b0, b1)
+		}
+		if sp.Italic {
+			add(l.attrStyleNew(pangoStyleItalic), b0, b1)
+		}
+		add(spacing(sp.LetterSpacing), b0, b1)
+		add(features(sp.Features), b0, b1)
 	}
 	return list
 }

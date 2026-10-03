@@ -176,6 +176,8 @@ type Element struct {
 
 	// Content.
 	text     string
+	spans    []Span // of a RichText
+	spansKey string // their styles, for the layout
 	ts       textStyle
 	maxLines int
 	single   bool

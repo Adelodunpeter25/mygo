@@ -225,6 +225,11 @@ func (g *gallery) text(c *ui.Context) {
 	card(c, "Typography", func() {
 		ui.Text(c, "Display 28").FontSize(28).Bold()
 		ui.Text(c, "Italic, underlined and struck through").Italic().Underline().Strikethrough()
+		ui.RichText(c,
+			ui.Span{Text: "Rich text mixes "}, ui.Span{Text: "bold", Weight: 700}, ui.Span{Text: ", "},
+			ui.Span{Text: "colored", Color: t.Accent}, ui.Span{Text: ", "}, ui.Span{Text: "large", Size: 20},
+			ui.Span{Text: " and "}, ui.Span{Text: "underlined", Underline: true}, ui.Span{Text: " runs in one paragraph."},
+		)
 		ui.Text(c, "Monospace: func main() {}").Font("monospace")
 		ui.Text(c, "SPACED CAPITALS").FontSize(12).Bold().LetterSpacing(2).TextColor(t.TextMuted)
 		ui.Text(c, "Tabular digits: 1,111.11 / 8,888.88").FontFeatures("tnum")

@@ -164,6 +164,20 @@ few. `Selectable` lets the user select a text with the pointer, Shift and
 the arrows, and copy it, as an error message or an identifier to paste
 elsewhere.
 
+`ui.RichText` mixes styles in one paragraph: each `ui.Span` sets what it
+changes (font, size, weight, italics, color, underline, strikethrough,
+letter spacing, features) over the style of the text, and the spans wrap
+together:
+
+```go
+ui.RichText(c,
+	ui.Span{Text: "Saved "},
+	ui.Span{Text: "report.pdf", Weight: 600},
+	ui.Span{Text: " to "},
+	ui.Span{Text: "Documents", Color: t.Accent, Underline: true},
+)
+```
+
 Text is laid out and drawn by the system's own text engine (DirectWrite on
 Windows, Core Text on macOS, Pango on Linux) in the system's font (Segoe UI,
 SF, the desktop's interface font, as GTK apps have it), falling back to the

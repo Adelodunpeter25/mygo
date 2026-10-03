@@ -1,6 +1,7 @@
 package text
 
 import (
+	"encoding/binary"
 	"math"
 	"slices"
 	"sync"
@@ -72,6 +73,142 @@ type Params struct {
 	// NoBreakWords only breaks lines between words, letting a long word
 	// overflow the width instead of breaking it.
 	NoBreakWords bool
+	// Spans styles runs of the text apart from Style, as EncodeSpans
+	// writes them.
+	Spans string
+}
+
+// Span styles the runes of a text before End, after those of the spans
+// before it. What it sets replaces the Style of the layout; Italic only
+// turns italics on.
+type Span struct {
+	End           int
+	Family        string
+	Size          float32
+	Weight        int
+	Italic        bool
+	LetterSpacing float32
+	Features      string
+}
+
+// style returns the style of the span's runes in a text of style base.
+func (sp Span) style(base Style) Style {
+	s := base
+	if sp.Family != "" {
+		s.Family = sp.Family
+	}
+	if sp.Size > 0 {
+		s.Size = sp.Size
+	}
+	if sp.Weight > 0 {
+		s.Weight = sp.Weight
+	}
+	if sp.Italic {
+		s.Italic = true
+	}
+	if sp.LetterSpacing != 0 {
+		s.LetterSpacing = sp.LetterSpacing
+	}
+	if sp.Features != "" {
+		s.Features = sp.Features
+	}
+	return s
+}
+
+// EncodeSpans writes spans for Params.Spans, which, as a string, keeps
+// Params a value layouts are cached by.
+func EncodeSpans(spans []Span) string {
+	var b []byte
+	str := func(s string) {
+		b = binary.AppendUvarint(b, uint64(len(s)))
+		b = append(b, s...)
+	}
+	for _, sp := range spans {
+		b = binary.AppendUvarint(b, uint64(max(sp.End, 0)))
+		str(sp.Family)
+		b = binary.LittleEndian.AppendUint32(b, math.Float32bits(sp.Size))
+		b = binary.AppendUvarint(b, uint64(max(sp.Weight, 0)))
+		if sp.Italic {
+			b = append(b, 1)
+		} else {
+			b = append(b, 0)
+		}
+		b = binary.LittleEndian.AppendUint32(b, math.Float32bits(sp.LetterSpacing))
+		str(sp.Features)
+	}
+	return string(b)
+}
+
+// decodeSpans reads what EncodeSpans wrote.
+func decodeSpans(s string) []Span {
+	b := []byte(s)
+	var out []Span
+	uvarint := func() int {
+		v, n := binary.Uvarint(b)
+		if n <= 0 {
+			b = nil
+			return 0
+		}
+		b = b[n:]
+		return int(v)
+	}
+	str := func() string {
+		n := uvarint()
+		if n > len(b) {
+			b = nil
+			return ""
+		}
+		s := string(b[:n])
+		b = b[n:]
+		return s
+	}
+	f32 := func() float32 {
+		if len(b) < 4 {
+			b = nil
+			return 0
+		}
+		v := math.Float32frombits(binary.LittleEndian.Uint32(b))
+		b = b[4:]
+		return v
+	}
+	for len(b) > 0 {
+		var sp Span
+		sp.End = uvarint()
+		sp.Family = str()
+		sp.Size = f32()
+		sp.Weight = uvarint()
+		if len(b) > 0 {
+			sp.Italic = b[0] != 0
+			b = b[1:]
+		}
+		sp.LetterSpacing = f32()
+		sp.Features = str()
+		if b == nil {
+			break
+		}
+		out = append(out, sp)
+	}
+	return out
+}
+
+// spansIn returns the spans of runes start to end of a text, with their
+// ends relative to start.
+func spansIn(spans []Span, start, end int) []Span {
+	var out []Span
+	from := 0
+	for _, sp := range spans {
+		s0 := from
+		from = max(sp.End, from)
+		if from <= start {
+			continue
+		}
+		if s0 >= end {
+			break
+		}
+		sp.End = min(from, end) - start
+		out = append(out, sp)
+	}
+	return out
 }
 
 // Layout is shaped and wrapped text. Positions are in DIPs relative to the
@@ -311,6 +448,7 @@ func metricsOf(f *Font, style Style) lineMetrics {
 func (s *System) layout(p Params) *Layout {
 	m := metricsOf(s.font(p.Style), p.Style)
 	runes := []rune(p.Text)
+	spans := decodeSpans(p.Spans)
 	l := &Layout{Params: p, Runes: runes}
 	y := float32(0)
 	for start := 0; start <= len(runes); {
@@ -322,7 +460,7 @@ func (s *System) layout(p Params) *Layout {
 		if p.MaxLines > 0 {
 			maxLines = p.MaxLines - len(l.Lines)
 		}
-		lines, truncated := s.paragraph(p, runes, start, end, maxLines, end < len(runes), m, &y)
+		lines, truncated := s.paragraph(p, spans, runes, start, end, maxLines, end < len(runes), m, &y)
 		l.Lines = append(l.Lines, lines...)
 		if truncated {
 			l.Truncated = true
@@ -371,23 +509,24 @@ func (s *System) layout(p Params) *Layout {
 // most maxLines lines (0 is unlimited) from *y down, and moves *y past it.
 // It reports whether it cut the text, which continues after the paragraph
 // when continues is set.
-func (s *System) paragraph(p Params, runes []rune, start, end, maxLines int, continues bool, m lineMetrics, y *float32) ([]Line, bool) {
+func (s *System) paragraph(p Params, spans []Span, runes []rune, start, end, maxLines int, continues bool, m lineMetrics, y *float32) ([]Line, bool) {
 	text := runes[start:end]
 	// A carriage return before the newline is part of it.
 	if n := len(text); n > 0 && text[n-1] == '\r' {
 		text = text[:n-1]
 	}
 	rtl := isRTL(text)
+	spans = spansIn(spans, start, start+len(text))
 	var shaped []shapedLine
 	if len(text) > 0 {
-		shaped = s.engine().shape(text, p.Style, max(p.Width, 0), rtl, p.NoBreakWords)
+		shaped = s.engine().shape(text, p.Style, spans, max(p.Width, 0), rtl, p.NoBreakWords)
 	}
 	if len(shaped) == 0 {
 		shaped = []shapedLine{{end: len(text)}}
 	}
 	truncated := false
 	if maxLines > 0 && (len(shaped) > maxLines || len(shaped) == maxLines && continues) {
-		last := s.ellipsize(text, shaped[maxLines-1].start, p, rtl)
+		last := s.ellipsize(text, spans, shaped[maxLines-1].start, p, rtl)
 		shaped = append(shaped[:maxLines-1], last)
 		truncated = true
 	}
@@ -421,9 +560,13 @@ func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetr
 	x0, x1 := float32(math.MaxFloat32), float32(-math.MaxFloat32)
 	var starts []int
 	for _, run := range sl.runs {
+		runSize := size
 		if f := run.font; f != nil {
 			line.Ascent = max(line.Ascent, f.Ascent)
 			line.Descent = max(line.Descent, f.Descent)
+			if f.Size > 0 {
+				runSize = f.Size // a span of another size
+			}
 		}
 		// A cluster holds the runes up to the next one of its run.
 		starts = starts[:0]
@@ -448,7 +591,7 @@ func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetr
 				g.Runes = max(next-g.Cluster, 1)
 				g.Cluster += offset
 			}
-			g.Size = size
+			g.Size = runSize
 			x0, x1 = min(x0, g.X), max(x1, g.X+g.Advance)
 			line.Glyphs = append(line.Glyphs, g)
 		}
@@ -470,18 +613,19 @@ func line(p Params, text []rune, sl shapedLine, offset int, rtl bool, m lineMetr
 
 // ellipsize lays out the paragraph text from rune start on one line ending
 // with an ellipsis: as many of its graphemes as fit the width with it.
-func (s *System) ellipsize(text []rune, start int, p Params, rtl bool) shapedLine {
+func (s *System) ellipsize(text []rune, spans []Span, start int, p Params, rtl bool) shapedLine {
 	e := s.engine()
 	rest := text[start:]
+	restSpans := spansIn(spans, start, len(text))
 	cut := len(rest)
 	if p.Width > 0 {
 		var ellipsis float32
-		for _, l := range e.shape([]rune{'…'}, p.Style, 0, rtl, false) {
+		for _, l := range e.shape([]rune{'…'}, p.Style, nil, 0, rtl, false) {
 			ellipsis = max(ellipsis, advance(l))
 		}
 		// The advance of each cluster, at its first rune.
 		advances := make([]float32, len(rest))
-		for _, l := range e.shape(rest, p.Style, 0, rtl, false) {
+		for _, l := range e.shape(rest, p.Style, restSpans, 0, rtl, false) {
 			for _, run := range l.runs {
 				for _, g := range run.glyphs {
 					if g.Cluster >= 0 && g.Cluster < len(rest) {
@@ -514,7 +658,12 @@ func (s *System) ellipsize(text []rune, start int, p Params, rtl bool) shapedLin
 	copy(t, rest[:cut])
 	t[cut] = '…'
 	out := shapedLine{start: start, end: start + cut}
-	for _, l := range e.shape(t, p.Style, 0, rtl, false) {
+	// The ellipsis takes the style of the text it ends.
+	tSpans := spansIn(restSpans, 0, cut)
+	if n := len(tSpans); n > 0 && tSpans[n-1].End == cut {
+		tSpans[n-1].End++
+	}
+	for _, l := range e.shape(t, p.Style, tSpans, 0, rtl, false) {
 		for _, run := range l.runs {
 			run.start, run.end = start+min(run.start, cut), start+min(run.end, cut)
 			for i := range run.glyphs {

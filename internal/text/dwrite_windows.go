@@ -114,6 +114,11 @@ const (
 	formatSetTextAlignment     = 3
 	formatSetWordWrapping      = 5
 	formatSetReadingDirection  = 6
+	layoutSetFontCollection    = 30
+	layoutSetFontFamilyName    = 31
+	layoutSetFontWeight        = 32
+	layoutSetFontStyle         = 33
+	layoutSetFontSize          = 35
 	layoutSetTypography        = 40
 	layoutDraw                 = 58
 	layoutGetLineMetrics       = 59
@@ -595,7 +600,7 @@ func collect(run *dwGlyphRun, desc *dwGlyphRunDescription) {
 	drawing = append(drawing, r)
 }
 
-func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords bool) []shapedLine {
+func (e *dwrite) shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
 	format := e.format(style)
 	if format == 0 || len(text) == 0 {
 		return nil
@@ -616,7 +621,7 @@ func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords 
 		wrapping = wordWrappingWholeWord
 	}
 	call(layout, formatSetWordWrapping, wrapping)
-	e.typeset(layout, style, uint32(len(u16)))
+	e.typeset(layout, style, spans, text)
 	if rtl {
 		// Trailing alignment keeps the lines at the left, as left-to-right
 		// lines are.
@@ -661,20 +666,68 @@ func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords 
 	return lines
 }
 
-// typeset applies a style's letter spacing and OpenType features to the
-// first n code units of a text layout.
-func (e *dwrite) typeset(layout uintptr, style Style, n uint32) {
-	// DWRITE_TEXT_RANGE{0, n}, passed in a register.
-	all := uintptr(n) << 32
-	if style.LetterSpacing != 0 {
-		// IDWriteTextLayout1 came with Windows 8.
-		if l1 := queryInterface(layout, &iidIDWriteTextLayout1); l1 != 0 {
-			method[func(this uintptr, leading, trailing, minAdvance float32, r uintptr) uintptr](l1, layout1SetCharacterSpacing)(
-				l1, 0, style.LetterSpacing, 0, all)
-			release(l1)
+// typeset applies a style's letter spacing and OpenType features to a text
+// layout of text, and the styles of its spans to their ranges.
+func (e *dwrite) typeset(layout uintptr, style Style, spans []Span, text []rune) {
+	// The code unit of each rune, and a DWRITE_TEXT_RANGE of runes, passed
+	// in a register.
+	units := make([]uint32, len(text)+1)
+	for i, r := range text {
+		units[i+1] = units[i] + 1
+		if r >= 0x10000 {
+			units[i+1]++
 		}
 	}
-	fs := features(style.Features)
+	textRange := func(from, to int) uintptr {
+		return uintptr(units[from]) | uintptr(units[to]-units[from])<<32
+	}
+	all := textRange(0, len(text))
+	e.spacing(layout, style.LetterSpacing, all)
+	e.typography(layout, style.Features, all)
+	from := 0
+	for _, sp := range spans {
+		to := max(from, min(sp.End, len(text)))
+		r := textRange(from, to)
+		from = to
+		if r>>32 == 0 {
+			continue
+		}
+		if sp.Family != "" {
+			family, custom := e.family(sp.Family)
+			name := utf16z(family)
+			call(layout, layoutSetFontCollection, e.collection(custom), r)
+			call(layout, layoutSetFontFamilyName, uintptr(unsafe.Pointer(&name[0])), r)
+			runtime.KeepAlive(name)
+		}
+		if sp.Weight > 0 {
+			call(layout, layoutSetFontWeight, uintptr(min(sp.Weight, 999)), r)
+		}
+		if sp.Italic {
+			call(layout, layoutSetFontStyle, fontStyleItalic, r)
+		}
+		if sp.Size > 0 {
+			method[func(this uintptr, size float32, r uintptr) uintptr](layout, layoutSetFontSize)(layout, sp.Size, r)
+		}
+		e.spacing(layout, sp.LetterSpacing, r)
+		e.typography(layout, sp.Features, r)
+	}
+}
+
+// spacing adds letter spacing to a range of a text layout.
+func (e *dwrite) spacing(layout uintptr, spacing float32, r uintptr) {
+	if spacing == 0 {
+		return
+	}
+	// IDWriteTextLayout1 came with Windows 8.
+	if l1 := queryInterface(layout, &iidIDWriteTextLayout1); l1 != 0 {
+		method[func(this uintptr, leading, trailing, minAdvance float32, r uintptr) uintptr](l1, layout1SetCharacterSpacing)(l1, 0, spacing, 0, r)
+		release(l1)
+	}
+}
+
+// typography sets OpenType features over a range of a text layout.
+func (e *dwrite) typography(layout uintptr, list string, r uintptr) {
+	fs := features(list)
 	if len(fs) == 0 {
 		return
 	}
@@ -689,7 +742,7 @@ func (e *dwrite) typeset(layout uintptr, style Style, n uint32) {
 		tag := uint32(f.tag[0]) | uint32(f.tag[1])<<8 | uint32(f.tag[2])<<16 | uint32(f.tag[3])<<24
 		call(typography, typographyAddFontFeature, uintptr(tag)|uintptr(f.value)<<32)
 	}
-	call(layout, layoutSetTypography, typography, all)
+	call(layout, layoutSetTypography, typography, r)
 }
 
 // run positions the glyphs of a run whose origin, on the right for a

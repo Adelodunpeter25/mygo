@@ -83,7 +83,7 @@ func (e *Element) textParams(width float32) text.Params {
 	p := text.Params{Text: e.text, Width: width, MaxLines: e.maxLines, Style: text.Style{
 		Family: ts.family, Size: ts.size, Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight,
 		LetterSpacing: ts.spacing, Features: ts.features,
-	}}
+	}, Spans: e.textSpans()}
 	switch ts.align {
 	case Center:
 		p.Align = text.Center

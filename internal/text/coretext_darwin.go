@@ -80,6 +80,8 @@ var ct struct {
 	numberCreate          func(alloc uintptr, typ int, value unsafe.Pointer) uintptr
 	numberGetValue        func(n uintptr, typ int, value unsafe.Pointer) bool
 	attributedString      func(alloc, str, attrs uintptr) uintptr
+	attributedMutable     func(alloc uintptr, max int, attributed uintptr) uintptr
+	attributedSet         func(attributed uintptr, r cfRange, name, value uintptr)
 	dataCreate            func(alloc uintptr, bytes *byte, n int) uintptr
 	keyCallbacks          uintptr
 	valueCallbacks        uintptr
@@ -205,6 +207,8 @@ func loadCoreText() error {
 	bind(cf, &ct.numberCreate, "CFNumberCreate")
 	bind(cf, &ct.numberGetValue, "CFNumberGetValue")
 	bind(cf, &ct.attributedString, "CFAttributedStringCreate")
+	bind(cf, &ct.attributedMutable, "CFAttributedStringCreateMutableCopy")
+	bind(cf, &ct.attributedSet, "CFAttributedStringSetAttribute")
 	bind(cf, &ct.dataCreate, "CFDataCreate")
 	ct.keyCallbacks = addr(cf, "kCFTypeDictionaryKeyCallBacks")
 	ct.valueCallbacks = addr(cf, "kCFTypeDictionaryValueCallBacks")
@@ -489,6 +493,39 @@ func (e *coreText) ctFont(style Style) uintptr {
 	return font
 }
 
+// styleSpans returns a copy of the attributed string of text, of style,
+// with the font and tracking of each span over its runes, owned.
+func (e *coreText) styleSpans(attributed uintptr, style Style, spans []Span, text []rune) uintptr {
+	styled := ct.attributedMutable(0, 0, attributed)
+	// The UTF-16 code unit of each rune.
+	at := make([]int, len(text)+1)
+	for i, r := range text {
+		at[i+1] = at[i] + 1
+		if r >= 0x10000 {
+			at[i+1]++
+		}
+	}
+	from := 0
+	for _, sp := range spans {
+		to := max(from, min(sp.End, len(text)))
+		r := cfRange{at[from], at[to] - at[from]}
+		from = to
+		if r.length == 0 {
+			continue
+		}
+		s := sp.style(style)
+		if font := e.ctFont(s); font != 0 {
+			ct.attributedSet(styled, r, ct.fontAttributeName, font)
+		}
+		if s.LetterSpacing != style.LetterSpacing && ct.trackingName != 0 {
+			tracking := cfFloat(float64(s.LetterSpacing))
+			ct.attributedSet(styled, r, ct.trackingName, tracking)
+			ct.release(tracking)
+		}
+	}
+	return styled
+}
+
 // withFeatures returns a copy of font with OpenType features, owned, or 0
 // when Core Text takes no features by tag.
 func withFeatures(font uintptr, fs []feature) uintptr {
@@ -564,7 +601,7 @@ func (e *coreText) fontOf(font uintptr) *Font {
 	return f
 }
 
-func (e *coreText) shape(text []rune, style Style, width float32, rtl, wholeWords bool) []shapedLine {
+func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, rtl, wholeWords bool) []shapedLine {
 	font := e.ctFont(style)
 	if font == 0 || len(text) == 0 {
 		return nil
@@ -588,6 +625,11 @@ func (e *coreText) shape(text []rune, style Style, width float32, rtl, wholeWord
 	defer ct.release(attrs)
 	attributed := ct.attributedString(0, str, attrs)
 	defer ct.release(attributed)
+	if len(spans) > 0 {
+		styled := e.styleSpans(attributed, style, spans, text)
+		defer ct.release(styled)
+		attributed = styled
+	}
 	typesetter := ct.typesetterCreate(attributed)
 	if typesetter == 0 {
 		return nil

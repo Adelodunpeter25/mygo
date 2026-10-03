@@ -770,14 +770,14 @@ func (e *Element) paintInput(p *Painter) {
 	ts := e.resolvedText()
 	if len(ed.text) == 0 && ed.compose == "" && ed.placeholder != "" {
 		pl := textSystem().Layout(text.Params{Text: ed.placeholder, Style: text.Style{Family: ts.family, Size: ts.size, Weight: ts.weight, LineHeight: ts.lineHeight}, Width: box.W})
-		p.textLayout(pl, ox, oy, t.TextMuted, ts)
+		p.textLayout(pl, ox, oy, t.TextMuted, ts, nil)
 	}
 	if a, b := ed.selection(); a != b && focused {
 		for _, r := range l.Selection(ed.displayIndex(a), ed.displayIndex(b)) {
 			p.Fill(Rect{ox + r.X, oy + r.Y, r.W, r.H}, t.Selection, 0)
 		}
 	}
-	p.textLayout(l, ox, oy, ts.color, ts)
+	p.textLayout(l, ox, oy, ts.color, ts, nil)
 	if ed.compose != "" {
 		start := ed.caret
 		end := start + utf8.RuneCountInString(ed.compose)

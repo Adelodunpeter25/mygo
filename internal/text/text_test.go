@@ -370,3 +370,70 @@ func TestParseFeatures(t *testing.T) {
 		t.Errorf("features = %v, want %v", got, want)
 	}
 }
+
+func TestSpans(t *testing.T) {
+	s := newSystem()
+	if err := s.RegisterFont(goregular.TTF, "MyGo Test Span"); err != nil {
+		t.Fatal(err)
+	}
+	const text = "Small LARGE small"
+	lay := func(spans ...Span) *Layout {
+		return s.Layout(Params{Text: text, Style: Style{Size: 14}, Spans: EncodeSpans(spans)})
+	}
+	glyph := func(l *Layout, r int) Glyph {
+		for _, g := range l.Lines[0].Glyphs {
+			if g.Cluster == r {
+				return g
+			}
+		}
+		t.Fatalf("no glyph of rune %d", r)
+		return Glyph{}
+	}
+	plain := lay()
+	big := lay(Span{End: 6}, Span{End: 11, Size: 28, Weight: 700})
+	if glyph(big, 0).Size != 14 || glyph(big, 7).Size != 28 || glyph(big, 13).Size != 14 {
+		t.Errorf("glyph sizes %v, %v, %v", glyph(big, 0).Size, glyph(big, 7).Size, glyph(big, 13).Size)
+	}
+	if big.Height < plain.Height*1.5 || big.Width <= plain.Width {
+		t.Errorf("a span twice the size leaves the text %v×%v, from %v×%v", big.Width, big.Height, plain.Width, plain.Height)
+	}
+	reg := lay(Span{End: 6}, Span{End: 11, Family: "MyGo Test Span"})
+	want := s.Layout(Params{Text: "L", Style: Style{Size: 14, Family: "MyGo Test Span"}}).Lines[0].Glyphs[0].Font
+	if glyph(reg, 7).Font != want || glyph(reg, 0).Font == want {
+		t.Error("a span's family does not draw its runes, or draws the others")
+	}
+	// Truncated, the last line keeps its spans' styles.
+	cut := s.Layout(Params{Text: text, Style: Style{Size: 14}, Width: glyph(big, 9).X, MaxLines: 1, Spans: EncodeSpans([]Span{{End: 6}, {End: 11, Size: 28}})})
+	if !cut.Truncated || glyph(cut, 7).Size != 28 {
+		t.Errorf("truncated: %v, the large run's size %v", cut.Truncated, glyph(cut, 7).Size)
+	}
+}
+
+func TestEncodeSpans(t *testing.T) {
+	spans := []Span{{End: 3, Family: "A, B", Size: 1.5, Weight: 600, Italic: true, LetterSpacing: -0.5, Features: "tnum"}, {End: 9}}
+	if got := decodeSpans(EncodeSpans(spans)); !slices.Equal(got, spans) {
+		t.Errorf("decoded %+v, want %+v", got, spans)
+	}
+	if got := decodeSpans(EncodeSpans(spans)[:5]); len(got) != 0 {
+		t.Errorf("a cut encoding decodes to %+v", got)
+	}
+	// The spans of a paragraph, relative to it.
+	in := spansIn([]Span{{End: 3, Weight: 1}, {End: 8, Weight: 2}, {End: 12, Weight: 3}}, 5, 10)
+	if want := []Span{{End: 3, Weight: 2}, {End: 5, Weight: 3}}; !slices.Equal(in, want) {
+		t.Errorf("spansIn = %+v, want %+v", in, want)
+	}
+}
+
+func TestSpansAcrossParagraphs(t *testing.T) {
+	s := newSystem()
+	l := s.Layout(Params{Text: "ab\ncd", Style: Style{Size: 14}, Spans: EncodeSpans([]Span{{End: 1}, {End: 4, Size: 30}})})
+	sizes := map[int]float32{}
+	for _, line := range l.Lines {
+		for _, g := range line.Glyphs {
+			sizes[g.Cluster] = g.Size
+		}
+	}
+	if sizes[0] != 14 || sizes[1] != 30 || sizes[3] != 30 || sizes[4] != 14 {
+		t.Errorf("sizes by rune %v", sizes)
+	}
+}

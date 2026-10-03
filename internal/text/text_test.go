@@ -2,6 +2,7 @@ package text
 
 import (
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -328,5 +329,44 @@ func TestUIFamily(t *testing.T) {
 	s.SetUIFamily("")
 	if font("") != before {
 		t.Error("system-ui keeps the interface family once it is unset")
+	}
+}
+
+func TestLetterSpacing(t *testing.T) {
+	s := newSystem()
+	width := func(spacing float32) float32 {
+		return s.Layout(Params{Text: "Hello", Style: Style{Size: 20, LetterSpacing: spacing}}).Width
+	}
+	plain, spaced, tight := width(0), width(4), width(-1)
+	// Four DIPs after each of the five letters, or of the four between
+	// them, as engines differ.
+	if d := spaced - plain; d < 4*4-0.5 || d > 4*5+0.5 {
+		t.Errorf("letter spacing of 4 widens Hello from %v to %v", plain, spaced)
+	}
+	if tight >= plain {
+		t.Errorf("negative letter spacing makes Hello %v wide, not less than %v", tight, plain)
+	}
+}
+
+func TestFontFeatures(t *testing.T) {
+	s := newSystem()
+	width := func(features string) float32 {
+		return s.Layout(Params{Text: "AVAVAVAVAV", Style: Style{Size: 40, Features: features}}).Width
+	}
+	// The system's interface font kerns A and V together.
+	kerned, plain := width(""), width("kern=0")
+	if plain <= kerned {
+		t.Errorf("AVAVAVAVAV is %v wide without kerning, %v with it", plain, kerned)
+	}
+	if w := width("kern=0, bogus, liga"); w != plain {
+		t.Errorf("a list with an invalid tag is %v wide, not %v", w, plain)
+	}
+}
+
+func TestParseFeatures(t *testing.T) {
+	got := features(" tnum, liga=0 ,salt=2,toolong, bad=x, ss01")
+	want := []feature{{[4]byte{'t', 'n', 'u', 'm'}, 1}, {[4]byte{'l', 'i', 'g', 'a'}, 0}, {[4]byte{'s', 'a', 'l', 't'}, 2}, {[4]byte{'s', 's', '0', '1'}, 1}}
+	if !slices.Equal(got, want) {
+		t.Errorf("features = %v, want %v", got, want)
 	}
 }

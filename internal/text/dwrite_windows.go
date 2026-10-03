@@ -66,6 +66,7 @@ var (
 	iidIDWriteFontFace2     = guid{0xd8b768ff, 0x64bc, 0x4e66, [8]byte{0x98, 0x2b, 0xec, 0x8e, 0x87, 0xf6, 0x93, 0xf7}}
 	iidIDWritePixelSnapping = guid{0xeaf3a2da, 0xecf4, 0x4d24, [8]byte{0xb6, 0x44, 0xb3, 0x4f, 0x68, 0x42, 0x02, 0x4b}}
 	iidIDWriteTextRenderer  = guid{0xef8a8135, 0x5cc6, 0x45fe, [8]byte{0x88, 0x25, 0xc5, 0xa0, 0x72, 0x4e, 0xb8, 0x19}}
+	iidIDWriteTextLayout1   = guid{0x9064d822, 0x80a7, 0x465c, [8]byte{0xa9, 0x86, 0xdf, 0x65, 0xf7, 0x8b, 0x8f, 0xeb}}
 )
 
 // Vtable indices, from the Windows SDK headers.
@@ -79,6 +80,7 @@ const (
 	factoryGetSystemFontCollection = 3
 	factoryRegisterFontFileLoader  = 13
 	factoryCreateTextFormat        = 15
+	factoryCreateTypography        = 16
 	factoryCreateTextLayout        = 18
 	factoryCreateGlyphRunAnalysis  = 23
 	// IDWriteFactory2
@@ -112,9 +114,12 @@ const (
 	formatSetTextAlignment     = 3
 	formatSetWordWrapping      = 5
 	formatSetReadingDirection  = 6
+	layoutSetTypography        = 40
 	layoutDraw                 = 58
 	layoutGetLineMetrics       = 59
 	layoutHitTestTextPosition  = 65
+	layout1SetCharacterSpacing = 69
+	typographyAddFontFeature   = 3
 	glyphsGetAlphaTextureBound = 3
 	glyphsCreateAlphaTexture   = 4
 	colorRunsMoveNext          = 3
@@ -611,6 +616,7 @@ func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords 
 		wrapping = wordWrappingWholeWord
 	}
 	call(layout, formatSetWordWrapping, wrapping)
+	e.typeset(layout, style, uint32(len(u16)))
 	if rtl {
 		// Trailing alignment keeps the lines at the left, as left-to-right
 		// lines are.
@@ -653,6 +659,37 @@ func (e *dwrite) shape(text []rune, style Style, width float32, rtl, wholeWords 
 		lines[li].runs = append(lines[li].runs, e.run(r, x, index))
 	}
 	return lines
+}
+
+// typeset applies a style's letter spacing and OpenType features to the
+// first n code units of a text layout.
+func (e *dwrite) typeset(layout uintptr, style Style, n uint32) {
+	// DWRITE_TEXT_RANGE{0, n}, passed in a register.
+	all := uintptr(n) << 32
+	if style.LetterSpacing != 0 {
+		// IDWriteTextLayout1 came with Windows 8.
+		if l1 := queryInterface(layout, &iidIDWriteTextLayout1); l1 != 0 {
+			method[func(this uintptr, leading, trailing, minAdvance float32, r uintptr) uintptr](l1, layout1SetCharacterSpacing)(
+				l1, 0, style.LetterSpacing, 0, all)
+			release(l1)
+		}
+	}
+	fs := features(style.Features)
+	if len(fs) == 0 {
+		return
+	}
+	var typography uintptr
+	if failed(call(e.factory, factoryCreateTypography, uintptr(unsafe.Pointer(&typography)))) {
+		return
+	}
+	defer release(typography)
+	for _, f := range fs {
+		// DWRITE_FONT_FEATURE{nameTag, parameter}, the tag in the byte order
+		// of DWRITE_MAKE_OPENTYPE_TAG.
+		tag := uint32(f.tag[0]) | uint32(f.tag[1])<<8 | uint32(f.tag[2])<<16 | uint32(f.tag[3])<<24
+		call(typography, typographyAddFontFeature, uintptr(tag)|uintptr(f.value)<<32)
+	}
+	call(layout, layoutSetTypography, typography, all)
 }
 
 // run positions the glyphs of a run whose origin, on the right for a

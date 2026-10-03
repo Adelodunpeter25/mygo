@@ -955,6 +955,10 @@ either.
   An atlas logs the rectangles that change, so renderers upload only those.
   DirectWrite methods taking floats are called through purego, which sets
   the floating point registers that `syscall` leaves alone on ARM64.
+  Letter spacing and OpenType features go to each engine's own, so lines
+  break with them: `IDWriteTextLayout1`'s character spacing and an
+  `IDWriteTypography`, Core Text's tracking and a font copied with feature
+  settings, Pango's attributes.
   Fontconfig knows no desktop's interface font, so on Linux `system-ui`
   stands for the family of GTK's `gtk-font-name` first
   (`platform.Theme.UIFont`, which package ui gives `SetUIFamily` with each

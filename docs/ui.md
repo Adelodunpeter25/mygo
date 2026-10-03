@@ -153,8 +153,12 @@ ui.List(c, len(app.rows), 32, func(i int) {
 
 `ui.Text` shows text that wraps at the width it gets, and `ui.Textf` formats
 it. `FontSize`, `FontWeight`, `Bold`, `Italic`, `Font`, `LineHeight`,
-`TextColor`, `TextAlign`, `Underline` and `Strikethrough` style it, set on
-the text or on any element above it, whose texts inherit them. `SingleLine`
+`TextColor`, `TextAlign`, `Underline`, `Strikethrough`, `LetterSpacing`
+and `FontFeatures` style it, set on the text or on any element above it,
+whose texts inherit them. `FontFeatures` turns on OpenType features of the
+font by tag, or sets them with `tag=value`: `FontFeatures("tnum")` gives
+digits of one width for numbers that change, `FontFeatures("liga=0")`
+turns ligatures off. `SingleLine`
 keeps text on one line, cut with an ellipsis, and `MaxLines` limits it to a
 few.
 

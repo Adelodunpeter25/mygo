@@ -11,6 +11,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"unicode"
 	"unsafe"
@@ -136,6 +137,12 @@ var pangoLib struct {
 	layoutSetAutoDir          func(layout uintptr, auto int32)
 	layoutGetLineCount        func(layout uintptr) int32
 	layoutGetLineReadonly     func(layout uintptr, line int32) *pangoLayoutLine
+	layoutSetAttributes       func(layout, attrs uintptr)
+	attrListNew               func() uintptr
+	attrListUnref             func(list uintptr)
+	attrListInsert            func(list, attr uintptr)
+	attrLetterSpacingNew      func(spacing int32) uintptr
+	attrFontFeaturesNew       func(features string) uintptr // Pango 1.38
 	fontMapConfigChanged      func(fontMap uintptr)
 	cairoFontOptionsCreate    func() uintptr
 	cairoFontOptionsDestroy   func(options uintptr)
@@ -231,6 +238,11 @@ func loadPango() error {
 	bind(pango, &l.layoutSetAutoDir, "pango_layout_set_auto_dir")
 	bind(pango, &l.layoutGetLineCount, "pango_layout_get_line_count")
 	bind(pango, &l.layoutGetLineReadonly, "pango_layout_get_line_readonly")
+	bind(pango, &l.layoutSetAttributes, "pango_layout_set_attributes")
+	bind(pango, &l.attrListNew, "pango_attr_list_new")
+	bind(pango, &l.attrListUnref, "pango_attr_list_unref")
+	bind(pango, &l.attrListInsert, "pango_attr_list_insert")
+	bind(pango, &l.attrLetterSpacingNew, "pango_attr_letter_spacing_new")
 	bind(cairo, &l.cairoFontOptionsCreate, "cairo_font_options_create")
 	bind(cairo, &l.cairoFontOptionsDestroy, "cairo_font_options_destroy")
 	bind(cairo, &l.cairoFontOptionsAntialias, "cairo_font_options_set_antialias")
@@ -258,6 +270,7 @@ func loadPango() error {
 	// Optional: Pango 1.44 and later, and what adding fonts needs.
 	missing = nil
 	bind(pango, &l.contextSetRoundPositions, "pango_context_set_round_glyph_positions")
+	bind(pango, &l.attrFontFeaturesNew, "pango_attr_font_features_new")
 	bind(pango, &l.metricsGetHeight, "pango_font_metrics_get_height")
 	bind(pango, &l.fontGetHBFont, "pango_font_get_hb_font")
 	if hb, err := open("libharfbuzz.so.0"); err == nil {
@@ -441,6 +454,10 @@ func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeW
 	l.layoutSetAutoDir(layout, int32(gFalse))
 	l.layoutSetFontDescription(layout, e.desc(style))
 	l.layoutSetText(layout, &utf8[0], int32(len(utf8)))
+	if attrs := attributes(style); attrs != 0 {
+		l.layoutSetAttributes(layout, attrs)
+		l.attrListUnref(attrs)
+	}
 	if width > 0 {
 		l.layoutSetWidth(layout, int32(min(float64(width)*pangoScale, math.MaxInt32)))
 		if wholeWords {
@@ -490,6 +507,37 @@ func (e *pangoEngine) shape(text []rune, style Style, width float32, rtl, wholeW
 		lines = append(lines, sl)
 	}
 	return lines
+}
+
+// attributes returns Pango's attributes of a style's letter spacing and
+// OpenType features, over the whole text, or 0 without either.
+func attributes(style Style) uintptr {
+	l := &pangoLib
+	fs := features(style.Features)
+	if l.attrFontFeaturesNew == nil {
+		fs = nil
+	}
+	if style.LetterSpacing == 0 && len(fs) == 0 {
+		return 0
+	}
+	list := l.attrListNew()
+	if style.LetterSpacing != 0 {
+		l.attrListInsert(list, l.attrLetterSpacingNew(int32(math.Round(float64(style.LetterSpacing)*pangoScale))))
+	}
+	if len(fs) > 0 {
+		// HarfBuzz's syntax, which Pango hands over.
+		var b strings.Builder
+		for i, f := range fs {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.Write(f.tag[:])
+			b.WriteByte('=')
+			b.WriteString(strconv.FormatUint(uint64(f.value), 10))
+		}
+		l.attrListInsert(list, l.attrFontFeaturesNew(b.String()))
+	}
+	return list
 }
 
 // space returns the glyph and advance, in Pango units, of a whitespace

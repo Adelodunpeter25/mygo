@@ -76,6 +76,7 @@ var ct struct {
 	arrayGetCount         func(a uintptr) int
 	arrayGetValueAtIndex  func(a uintptr, i int) uintptr
 	setCreate             func(alloc uintptr, values *uintptr, n int, callbacks uintptr) uintptr
+	arrayCreate           func(alloc uintptr, values *uintptr, n int, callbacks uintptr) uintptr
 	numberCreate          func(alloc uintptr, typ int, value unsafe.Pointer) uintptr
 	numberGetValue        func(n uintptr, typ int, value unsafe.Pointer) bool
 	attributedString      func(alloc, str, attrs uintptr) uintptr
@@ -83,6 +84,7 @@ var ct struct {
 	keyCallbacks          uintptr
 	valueCallbacks        uintptr
 	setCallbacks          uintptr
+	arrayCallbacks        uintptr
 	fontAttributeName     uintptr
 	paragraphStyleName    uintptr
 	familyNameAttribute   uintptr
@@ -93,6 +95,7 @@ var ct struct {
 	fontWithDescriptor    func(desc uintptr, size float64, matrix uintptr) uintptr
 	uiFontForLanguage     func(typ uint32, size float64, language uintptr) uintptr
 	fontWithTraits        func(font uintptr, size float64, matrix uintptr, value, mask uint32) uintptr
+	fontWithAttrs         func(font uintptr, size float64, matrix, desc uintptr) uintptr
 	descriptorWithAttrs   func(attrs uintptr) uintptr
 	descriptorMatching    func(desc, mandatory uintptr) uintptr
 	descriptorAttribute   func(desc, name uintptr) uintptr
@@ -118,6 +121,13 @@ var ct struct {
 	runGetPositions       func(run uintptr, r cfRange, out *cgPoint)
 	runGetAdvances        func(run uintptr, r cfRange, out *cgSize)
 	runGetStringIndices   func(run uintptr, r cfRange, out *int)
+
+	// Optional: tracking (macOS 10.12) and OpenType features by tag
+	// (macOS 10.13).
+	trackingName    uintptr
+	featureSettings uintptr
+	featureTag      uintptr
+	featureValue    uintptr
 
 	// Core Graphics
 	colorSpaceWithName      func(name uintptr) uintptr
@@ -191,6 +201,7 @@ func loadCoreText() error {
 	bind(cf, &ct.arrayGetCount, "CFArrayGetCount")
 	bind(cf, &ct.arrayGetValueAtIndex, "CFArrayGetValueAtIndex")
 	bind(cf, &ct.setCreate, "CFSetCreate")
+	bind(cf, &ct.arrayCreate, "CFArrayCreate")
 	bind(cf, &ct.numberCreate, "CFNumberCreate")
 	bind(cf, &ct.numberGetValue, "CFNumberGetValue")
 	bind(cf, &ct.attributedString, "CFAttributedStringCreate")
@@ -198,6 +209,7 @@ func loadCoreText() error {
 	ct.keyCallbacks = addr(cf, "kCFTypeDictionaryKeyCallBacks")
 	ct.valueCallbacks = addr(cf, "kCFTypeDictionaryValueCallBacks")
 	ct.setCallbacks = addr(cf, "kCFTypeSetCallBacks")
+	ct.arrayCallbacks = addr(cf, "kCFTypeArrayCallBacks")
 	ct.fontAttributeName = value(text, "kCTFontAttributeName")
 	ct.paragraphStyleName = value(text, "kCTParagraphStyleAttributeName")
 	ct.familyNameAttribute = value(text, "kCTFontFamilyNameAttribute")
@@ -207,6 +219,7 @@ func loadCoreText() error {
 	bind(text, &ct.fontWithDescriptor, "CTFontCreateWithFontDescriptor")
 	bind(text, &ct.uiFontForLanguage, "CTFontCreateUIFontForLanguage")
 	bind(text, &ct.fontWithTraits, "CTFontCreateCopyWithSymbolicTraits")
+	bind(text, &ct.fontWithAttrs, "CTFontCreateCopyWithAttributes")
 	bind(text, &ct.descriptorWithAttrs, "CTFontDescriptorCreateWithAttributes")
 	bind(text, &ct.descriptorMatching, "CTFontDescriptorCreateMatchingFontDescriptor")
 	bind(text, &ct.descriptorAttribute, "CTFontDescriptorCopyAttribute")
@@ -247,6 +260,16 @@ func loadCoreText() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("missing %s", strings.Join(missing, ", "))
 	}
+	optional := func(lib uintptr, name string) uintptr {
+		if p, err := purego.Dlsym(lib, name); err == nil && p != 0 {
+			return **(**uintptr)(unsafe.Pointer(&p))
+		}
+		return 0
+	}
+	ct.trackingName = optional(text, "kCTTrackingAttributeName")
+	ct.featureSettings = optional(text, "kCTFontFeatureSettingsAttribute")
+	ct.featureTag = optional(text, "kCTFontOpenTypeFeatureTag")
+	ct.featureValue = optional(text, "kCTFontOpenTypeFeatureValue")
 	// Optional: adding fonts from memory (macOS 10.13), sRGB by name.
 	if sym, err := purego.Dlsym(text, "CTFontManagerCreateFontDescriptorsFromData"); err == nil && sym != 0 {
 		purego.RegisterFunc(&ct.descriptorsFromData, sym)
@@ -412,7 +435,7 @@ func (e *coreText) named(family string, size float32, weight int, italic bool) u
 
 // ctFont returns the CTFont of a style.
 func (e *coreText) ctFont(style Style) uintptr {
-	key := Style{Family: style.Family, Size: style.FontSize(), Weight: style.weight(), Italic: style.Italic}
+	key := Style{Family: style.Family, Size: style.FontSize(), Weight: style.weight(), Italic: style.Italic, Features: style.Features}
 	if f, ok := e.primary[key]; ok {
 		return f
 	}
@@ -421,6 +444,19 @@ func (e *coreText) ctFont(style Style) uintptr {
 			ct.release(f)
 		}
 		clear(e.primary)
+	}
+	if key.Features != "" {
+		// The font without the features, with them.
+		base := key
+		base.Features = ""
+		font := e.ctFont(base)
+		if with := withFeatures(font, features(key.Features)); with != 0 {
+			font = with
+		} else {
+			ct.retain(font)
+		}
+		e.primary[key] = font
+		return font
 	}
 	var font uintptr
 	for _, family := range familyList(key.Family) {
@@ -451,6 +487,33 @@ func (e *coreText) ctFont(style Style) uintptr {
 	}
 	e.primary[key] = font
 	return font
+}
+
+// withFeatures returns a copy of font with OpenType features, owned, or 0
+// when Core Text takes no features by tag.
+func withFeatures(font uintptr, fs []feature) uintptr {
+	if len(fs) == 0 || ct.featureSettings == 0 || ct.featureTag == 0 || ct.featureValue == 0 {
+		return 0
+	}
+	settings := make([]uintptr, len(fs))
+	for i, f := range fs {
+		tag := cfString(string(f.tag[:]))
+		v := int64(f.value)
+		value := ct.numberCreate(0, cfNumberSInt64Type, unsafe.Pointer(&v))
+		settings[i] = cfDictionary([]uintptr{ct.featureTag, ct.featureValue}, []uintptr{tag, value})
+		ct.release(tag)
+		ct.release(value)
+	}
+	array := ct.arrayCreate(0, &settings[0], len(settings), ct.arrayCallbacks)
+	for _, s := range settings {
+		ct.release(s)
+	}
+	attrs := cfDictionary([]uintptr{ct.featureSettings}, []uintptr{array})
+	ct.release(array)
+	desc := ct.descriptorWithAttrs(attrs)
+	ct.release(attrs)
+	defer ct.release(desc)
+	return ct.fontWithAttrs(font, 0, 0, desc) // size 0 keeps the font's
 }
 
 // registeredFont returns the font of the face of a registered family that
@@ -514,7 +577,14 @@ func (e *coreText) shape(text []rune, style Style, width float32, rtl, wholeWord
 	if rtl {
 		paragraph = e.styles[1]
 	}
-	attrs := cfDictionary([]uintptr{ct.fontAttributeName, ct.paragraphStyleName}, []uintptr{font, paragraph})
+	keys, values := []uintptr{ct.fontAttributeName, ct.paragraphStyleName}, []uintptr{font, paragraph}
+	if style.LetterSpacing != 0 && ct.trackingName != 0 {
+		// Tracking, in points as DIPs, keeps the font's kerning.
+		tracking := cfFloat(float64(style.LetterSpacing))
+		defer ct.release(tracking)
+		keys, values = append(keys, ct.trackingName), append(values, tracking)
+	}
+	attrs := cfDictionary(keys, values)
 	defer ct.release(attrs)
 	attributed := ct.attributedString(0, str, attrs)
 	defer ct.release(attributed)

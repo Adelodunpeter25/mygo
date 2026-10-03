@@ -22,6 +22,11 @@ type Style struct {
 	// LineHeight is the height of a line as a multiple of Size; 0 takes
 	// the font's own line spacing.
 	LineHeight float32
+	// LetterSpacing adds DIPs after every character; negative tightens.
+	LetterSpacing float32
+	// Features are OpenType features, comma separated: a tag turns one
+	// on, and tag=value sets it, as "tnum, liga=0, salt=2".
+	Features string
 }
 
 func (s Style) weight() int {

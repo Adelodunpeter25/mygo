@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/egoist/mygo/internal/text"
 )
 
@@ -102,6 +104,8 @@ type textStyle struct {
 	align      Align
 	underline  bool
 	strike     bool
+	spacing    float32 // letter spacing
+	features   string
 }
 
 const (
@@ -114,6 +118,11 @@ const (
 	setAlign
 	setUnderline
 	setStrike
+	setSpacing
+	setFeatures
+
+	// setAll has every bit of textStyle.set.
+	setAll = setFeatures<<1 - 1
 )
 
 // Element is a node of a frame's user interface. The functions that create
@@ -450,6 +459,27 @@ func (e *Element) Underline() *Element { e.ts.underline = true; e.ts.set |= setU
 
 // Strikethrough strikes text through.
 func (e *Element) Strikethrough() *Element { e.ts.strike = true; e.ts.set |= setStrike; return e }
+
+// LetterSpacing adds v DIPs after every character of text, or tightens it
+// with a negative v, as for labels in capitals.
+func (e *Element) LetterSpacing(v float32) *Element {
+	e.ts.spacing = v
+	e.ts.set |= setSpacing
+	return e
+}
+
+// FontFeatures turns on OpenType features of the font, by tag, or sets
+// them with tag=value:
+//
+//	ui.Textf(c, "%d items", n).FontFeatures("tnum")   // digits of one width
+//	ui.Text(c, "office").FontFeatures("liga=0")       // no ligatures
+//
+// A font without a feature ignores it.
+func (e *Element) FontFeatures(features ...string) *Element {
+	e.ts.features = strings.Join(features, ",")
+	e.ts.set |= setFeatures
+	return e
+}
 
 // MaxLines shows at most n lines of the element's text, ending it with an
 // ellipsis.

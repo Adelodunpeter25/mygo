@@ -8,6 +8,7 @@
 package text
 
 import (
+	"strconv"
 	"strings"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -93,6 +94,37 @@ func generic(family string) string {
 		return "monospace"
 	}
 	return ""
+}
+
+// feature is an OpenType feature of Style.Features: its tag and value, 0
+// to turn it off, 1 on, or the alternate to pick.
+type feature struct {
+	tag   [4]byte
+	value uint32
+}
+
+// features parses Style.Features, leaving out what is not a tag of four
+// printable characters with an optional =value.
+func features(list string) []feature {
+	var out []feature
+	for _, item := range strings.Split(list, ",") {
+		tag, value, set := strings.Cut(strings.TrimSpace(item), "=")
+		tag = strings.TrimSpace(tag)
+		f := feature{value: 1}
+		if set {
+			v, err := strconv.ParseUint(strings.TrimSpace(value), 10, 32)
+			if err != nil {
+				continue
+			}
+			f.value = uint32(v)
+		}
+		if len(tag) != 4 || strings.ContainsFunc(tag, func(r rune) bool { return r < 0x20 || r > 0x7e }) {
+			continue
+		}
+		copy(f.tag[:], tag)
+		out = append(out, f)
+	}
+	return out
 }
 
 // familyList splits a comma-separated list of families, without quotes.

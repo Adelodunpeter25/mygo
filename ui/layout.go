@@ -80,7 +80,10 @@ func place(e *Element, x, y float32) {
 // (0 for one line per paragraph).
 func (e *Element) textParams(width float32) text.Params {
 	ts := e.resolvedText()
-	p := text.Params{Text: e.text, Style: text.Style{Family: ts.family, Size: ts.size, Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight}, Width: width, MaxLines: e.maxLines}
+	p := text.Params{Text: e.text, Width: width, MaxLines: e.maxLines, Style: text.Style{
+		Family: ts.family, Size: ts.size, Weight: ts.weight, Italic: ts.italic, LineHeight: ts.lineHeight,
+		LetterSpacing: ts.spacing, Features: ts.features,
+	}}
 	switch ts.align {
 	case Center:
 		p.Align = text.Center
@@ -93,7 +96,7 @@ func (e *Element) textParams(width float32) text.Params {
 // resolvedText merges the text styles of the element and its ancestors.
 func (e *Element) resolvedText() textStyle {
 	var out textStyle
-	for p := e; p != nil && out.set != setFamily|setSize|setWeight|setItalic|setColor|setLineHeight|setAlign|setUnderline|setStrike; p = p.parent {
+	for p := e; p != nil && out.set != setAll; p = p.parent {
 		t := &p.ts
 		take := t.set &^ out.set
 		if take&setFamily != 0 {
@@ -119,6 +122,12 @@ func (e *Element) resolvedText() textStyle {
 		}
 		if take&setUnderline != 0 {
 			out.underline = t.underline
+		}
+		if take&setSpacing != 0 {
+			out.spacing = t.spacing
+		}
+		if take&setFeatures != 0 {
+			out.features = t.features
 		}
 		if take&setStrike != 0 {
 			out.strike = t.strike

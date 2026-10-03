@@ -23,6 +23,11 @@
 // (focus, scrolling, text being edited, animations) follows its position
 // among its siblings, or its Key.
 //
+// Widgets take the theme's look, whose Spacing sizes them all. Each is
+// built on a base without a look, such as ButtonBase, CheckboxBase,
+// TabsBase or SelectBase, which handles the pointer, the keyboard, the
+// focus and accessibility: style its elements for a design of your own.
+//
 // Tester runs views in tests, without a window.
 //
 // The package is experimental: its API may change in any release, without

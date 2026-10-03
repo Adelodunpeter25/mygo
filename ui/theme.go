@@ -34,9 +34,23 @@ type Theme struct {
 	Scrollbar Color
 	// Radius rounds the corners of controls.
 	Radius float32
+	// Spacing is the unit of the room widgets leave inside and between
+	// their parts: their paddings and gaps, and the sizes of check boxes,
+	// switches, sliders and the rows of tables and trees, are multiples
+	// of it. 4 by default: 3 makes widgets compact, 5 roomy; 0 is 4.
+	Spacing float32
 	// FontSize is the size of text, Font its family ("" is the system's).
 	FontSize float32
 	Font     string
+}
+
+// space returns n units of the theme's spacing.
+func (t *Theme) space(n float32) float32 {
+	s := t.Spacing
+	if s <= 0 {
+		s = 4
+	}
+	return n * s
 }
 
 func defaultFontSize() float32 {
@@ -65,6 +79,7 @@ func LightTheme() *Theme {
 		Focus:          RGBA(37, 99, 235, 0.55),
 		Scrollbar:      RGBA(0, 0, 0, 0.32),
 		Radius:         6,
+		Spacing:        4,
 		FontSize:       defaultFontSize(),
 	}
 }
@@ -89,6 +104,7 @@ func DarkTheme() *Theme {
 		Focus:          RGBA(96, 165, 250, 0.6),
 		Scrollbar:      RGBA(255, 255, 255, 0.35),
 		Radius:         6,
+		Spacing:        4,
 		FontSize:       defaultFontSize(),
 	}
 }

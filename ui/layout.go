@@ -155,9 +155,12 @@ func (e *Element) leafWidths() (maxW, minW float32) {
 		p.Width, p.NoBreakWords = 1, true
 		return full, sys.Layout(p).Width
 	case kindImage:
-		if e.image != nil {
-			return float32(e.image.w), 0
-		}
+		w, _ := e.intrinsicSize()
+		return w, 0
+	case kindIcon:
+		// Icons keep their size where room is short, as text does.
+		w, _ := e.intrinsicSize()
+		return w, w
 	case kindInput:
 		return 200, 0
 	}
@@ -249,9 +252,9 @@ func contentHeight(e *Element, cw float32) float32 {
 	switch e.kind {
 	case kindText:
 		return textSystem().Layout(e.textParams(max(cw, 1))).Height
-	case kindImage:
-		if e.image != nil && e.image.w > 0 {
-			return cw * float32(e.image.h) / float32(e.image.w)
+	case kindImage, kindIcon:
+		if w, h := e.intrinsicSize(); w > 0 {
+			return cw * h / w
 		}
 		return 0
 	case kindInput:
@@ -280,7 +283,7 @@ func layoutBox(e *Element, w, h float32) {
 	case kindInput:
 		e.layoutInput(cw, ch)
 		return
-	case kindImage:
+	case kindImage, kindIcon:
 		return
 	}
 	lw, lh := cw, ch
@@ -446,7 +449,7 @@ func flexLayout(e *Element, cw, ch float32, commit bool) (usedW, usedH float32) 
 			} else {
 				if v, ok := c.width.resolve(base(cw)); ok {
 					it.cross = c.clampW(v, cw)
-				} else if selfAlign(c, align) == Stretch && finite(cw) {
+				} else if stretches(c, align) && finite(cw) {
 					it.cross = c.clampW(cw-it.marginCr, cw)
 				} else {
 					it.cross = fitWidth(c, cw-it.marginCr, cw)
@@ -463,7 +466,7 @@ func flexLayout(e *Element, cw, ch float32, commit bool) (usedW, usedH float32) 
 		for i := ln.start; i < ln.end; i++ {
 			it := &items[i]
 			c := it.e
-			if selfAlign(c, align) != Stretch {
+			if !stretches(c, align) {
 				continue
 			}
 			if row {
@@ -536,10 +539,16 @@ func crossOf(c *Element, cw float32, align Align) float32 {
 	if v, ok := c.width.resolve(base(cw)); ok {
 		return c.clampW(v, cw)
 	}
-	if selfAlign(c, align) == Stretch && finite(cw) {
+	if stretches(c, align) && finite(cw) {
 		return c.clampW(cw-c.marginX(), cw)
 	}
 	return fitWidth(c, cw-c.marginX(), cw)
+}
+
+// stretches reports whether c stretches across its line, as aligning by
+// align asks, which icons do not: they keep their size.
+func stretches(c *Element, align Align) bool {
+	return selfAlign(c, align) == Stretch && c.kind != kindIcon
 }
 
 func selfAlign(c *Element, align Align) Align {
@@ -659,6 +668,9 @@ func layoutAbsolute(e *Element) {
 			h = c.clampH(ph-top-bottom-c.marginY(), ph)
 		} else {
 			h = heightAt(c, w, ph)
+		}
+		if c.place.on {
+			left, top = c.place.fit(c, left, top, w, h, pw, ph)
 		}
 		x := left + c.margin[3]
 		if !lok && rok {

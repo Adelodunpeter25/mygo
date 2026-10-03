@@ -17,7 +17,7 @@ func SplitVertical(c *Context, size *float32, first, second func()) *Element {
 
 func split(c *Context, size *float32, first, second func(), vertical bool) *Element {
 	t := c.theme
-	const minPane, grip = 40, 6
+	minPane, grip := t.space(10), t.space(1.5)
 	e := Row(c).AlignItems(Stretch)
 	if vertical {
 		e = Column(c).AlignItems(Stretch)
@@ -71,12 +71,12 @@ func split(c *Context, size *float32, first, second func(), vertical bool) *Elem
 			back, forth = KeyUp, KeyDown
 		}
 		if div.Shortcut(0, back) {
-			set(*size - 10)
+			set(*size - t.space(2.5))
 		}
 		if div.Shortcut(0, forth) {
-			set(*size + 10)
+			set(*size + t.space(2.5))
 		}
-		div.hasRange, div.accRange = true, [3]float64{minPane, float64(max(total-grip-minPane, minPane)), float64(*size)}
+		div.hasRange, div.accRange = true, [3]float64{float64(minPane), float64(max(total-grip-minPane, minPane)), float64(*size)}
 		div.Draw(func(p *Painter, r Rect) {
 			line := t.Border
 			if div.Hovered() || div.Pressed() {

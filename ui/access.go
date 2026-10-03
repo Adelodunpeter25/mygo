@@ -75,7 +75,7 @@ func (e *Element) accessRole() (platform.AccessRole, bool) {
 		return platform.RoleTextField, true
 	case e.kind == kindText:
 		return platform.RoleText, e.text != ""
-	case e.kind == kindImage:
+	case e.kind == kindImage || e.kind == kindIcon:
 		return platform.RoleImage, e.label != "" // others are decoration
 	case e.flags&flagClickable != 0 && e.flags&flagFocusable != 0:
 		return platform.RoleButton, true

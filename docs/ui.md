@@ -219,8 +219,20 @@ if c.Theme().Dark {
 	t = *ui.DarkTheme()
 }
 t.Accent, t.Radius = ui.Hex("#7c3aed"), 8
+t.Spacing = 3 // compact
 c.SetTheme(&t)
 ```
+
+`Spacing` is the unit of the room widgets leave: their paddings and gaps,
+and the sizes of check boxes, switches, sliders and the rows of tables and
+trees, are multiples of it. It is 4 by default; 3 makes every widget
+compact, 5 roomy. `FontSize` sizes their text, and `Radius` rounds their
+corners.
+
+A widget returns its element, so a call after it styles it differently
+from the rest: `ui.Button(c, "Save").Padding(10, 20).Radius(999)`. For a
+look of your own, build on the widgets' bases, which have none: see
+[widgets without a look](#widgets-without-a-look).
 
 ## Widgets
 
@@ -240,10 +252,66 @@ c.SetTheme(&t)
 | `Split`, `SplitVertical` | two panes with a divider between them that the user drags, or moves with the arrow keys, to resize them; the first's size is a `*float32` |
 | `Table` | rows under a header of `TableColumn`s, built only while in view, choosing a `*int` by click or with Up and Down; a double click or Enter reports `Submitted` |
 | `Tree`, `TreeItem` | items that open and close, built inside the items they belong to, with the arrow keys moving between them; `Clicked` and `Selected` choose one |
-| `Image` | shows a `*ui.Bitmap` |
+| `Icon` | shows a `*ui.SVG` in the color of the text, as high as the font size, see [images and icons](#images-and-icons) |
+| `Image` | shows a `*ui.Bitmap`, or a `*ui.SVG` in its own colors |
 | `Divider`, `Spacer` | a line, and space that grows |
 | `Scroll`, `ScrollHorizontal`, `List` | scroll containers, see [layout](#layout) |
 | `Modal`, `Popover`, `Overlay` | dialogs and panels above the window, see [overlays](#overlays) |
+
+### Widgets without a look
+
+Every widget is built on a base, the same widget without a look: the base
+handles the pointer, the keyboard and the focus, and tells assistive
+technology what it is, and leaves every color, size and shape to the
+elements it returns, which you style as any other. Build a design of your
+own on them, as headless component libraries do on the web:
+
+| | |
+|---|---|
+| `ButtonBase` | a row that takes the focus, and reports `Clicked` for the pointer, Enter and Space |
+| `CheckboxBase`, `SwitchBase` | a row that toggles a `*bool` |
+| `RadioBase` | a row that selects its value into a `*T` |
+| `SliderBase` | sets a `*float64` from where the pointer is across its content box, inside its padding, and with the arrows, Home and End |
+| `TabsBase` | the tab `List`, whose `Tab`s choose a `*int`, with the arrows moving the choice and the focus |
+| `SelectBase` | a `Trigger` opening a `Popup` of `Item`s choosing a `*T`, which the arrows highlight (`Highlighted`) and Enter chooses |
+| `PopoverBase`, `DialogBase` | a panel below an anchor, or over a backdrop covering the window, that a click outside or Escape closes |
+| `TextInputBase`, `TextAreaBase` | text inputs without padding, background, border or corners |
+
+A segmented control on `TabsBase`, and a select on `SelectBase`:
+
+```go
+t := c.Theme()
+tabs := ui.TabsBase(c, &app.view, 3)
+tabs.List.Padding(3).Radius(999).Background(t.Surface).Children(func() {
+	for i, name := range []string{"Day", "Week", "Month"} {
+		seg := tabs.Tab(i).Padding(5, 14).Radius(999)
+		if i == app.view {
+			seg.Background(t.Background).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.15))
+		}
+		seg.Children(func() { ui.Text(c, name) })
+	}
+})
+
+sel := ui.SelectBase(c, &app.size)
+sel.Trigger.Gap(6).Padding(6, 10).Radius(8).Border(1, t.Border).Children(func() {
+	ui.Text(c, app.size)
+	ui.Icon(c, chevron)
+})
+sel.Popup(func(panel *ui.Element) {
+	panel.Margin(4, 0, 0, 0).Padding(4).Radius(10).Background(t.Background).Border(1, t.Border)
+	for _, size := range sizes {
+		item := sel.Item(size).Padding(6, 10).Radius(6)
+		if item.Highlighted() {
+			item.Background(t.Accent).TextColor(t.AccentText)
+		}
+		item.Children(func() { ui.Text(c, size) })
+	}
+})
+```
+
+Bases ring the element with the keyboard focus, as every element taking
+the focus is; `FocusRing(false)` turns the ring off for a widget that
+draws its own, with `Painter.FocusRing` while `FocusVisible`.
 
 Widgets that change a value take a pointer to it, so they need no handler:
 `ui.Checkbox(c, &app.settings.Sync, "Sync")` changes the field the moment
@@ -460,7 +528,7 @@ To animate continuously, compute from `c.Now()` and call
 `c.AnimationFrame()` in every frame that moves: MyGo draws the next frame
 when the display can show it, and draws nothing while nothing changes.
 
-## Images
+## Images and icons
 
 `ui.NewBitmap` makes a bitmap of an `image.Image`, and `ui.DecodeBitmap` of
 PNG, JPEG or GIF data. Make bitmaps once, not in the view: MyGo keeps a
@@ -474,6 +542,58 @@ var logo, _ = ui.DecodeBitmap(logoPNG)
 
 ui.Image(c, logo).Size(64, 64).Fit(ui.Contain).Radius(12)
 ```
+
+SVG files stay sharp at any size and scale. `ui.ParseSVG` parses one, and
+`ui.MustParseSVG` one that is part of the program, such as an embedded
+file, panicking when it is in error. `ui.Icon` shows an SVG as an icon: in
+the color of the text, which it takes from its ancestors as text does,
+whatever colors the file has, and as high as the font size. Icon sets such
+as Lucide, Heroicons, Tabler or Material Symbols work as they are:
+
+```go
+//go:embed icons/save.svg
+var saveSVG []byte
+
+var save = ui.MustParseSVG(saveSVG)
+
+ui.Row(c).Gap(6).Children(func() {
+	ui.Icon(c, save)
+	ui.Text(c, "Save")
+})
+ui.Icon(c, save).FontSize(24).TextColor(c.Theme().Danger)
+```
+
+Inside a button, which lays out its children in a row and gives them its
+text color, an icon goes before the label:
+
+```go
+ui.PrimaryButton(c, "").Children(func() {
+	ui.Icon(c, save)
+	ui.Text(c, "Save").SingleLine()
+})
+```
+
+`ui.Image` shows an SVG in its own colors instead, with the text color for
+its `currentColor`, at the size the SVG gives (its `width` and `height`, or
+those of its `viewBox`) unless given another:
+
+```go
+ui.Image(c, illustration).Width(240)
+```
+
+MyGo draws an SVG's shapes into the GPU's atlas once for each size it shows
+at, the way it draws text, and the GPU draws them from there: moving an
+icon, scrolling it or changing its color draws nothing again. MyGo draws
+paths and the basic shapes, groups, `use` and `symbol` elements,
+transforms, fills and strokes (with their joins, caps and dashes) of
+colors, `currentColor` and linear and radial gradients, opacity, clip paths,
+masks and style sheets of simple selectors (type, class and id). It leaves
+out text, embedded images, patterns, markers and filters: convert text to
+paths in your editor before exporting.
+
+Icons are decorations that assistive technology does not see, as images
+are, unless `Label` names them. In `Draw` callbacks, `Painter.Icon` and
+`Painter.Image` draw SVGs too.
 
 ## Windows with native UI
 

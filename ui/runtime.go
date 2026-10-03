@@ -42,6 +42,7 @@ type engine struct {
 	text  *text.System
 	scene scene.Scene
 	paths paths
+	svgs  svgs
 	flex  flexScratch
 
 	states map[uint64]*state
@@ -200,6 +201,7 @@ func (rt *engine) runFrame() {
 	}
 	rt.host.present(&rt.scene)
 	rt.prune()
+	rt.prunePictures()
 	rt.text.EndFrame()
 	rt.regs, rt.nextRegs = rt.nextRegs, rt.regs
 	rt.updateTextInput()
@@ -305,6 +307,7 @@ func (rt *engine) commitElement(e *Element, clip Rect) {
 	}
 	v := intersect(Rect{e.x, e.y, e.w, e.h}, clip)
 	s.vx, s.vy, s.vw, s.vh = v.X, v.Y, v.W, v.H
+	s.cx, s.cw = e.x+e.pad[3]+e.borderW, max(e.w-e.padX(), 0)
 	if e.flags&(flagScrollX|flagScrollY) != 0 {
 		s.contentW, s.contentH = e.contentW, e.contentH
 		s.scrollX = max(0, min(s.scrollX, e.contentW-e.w))

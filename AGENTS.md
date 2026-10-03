@@ -46,6 +46,7 @@ go run ./cmd/mygo dev examples/todo        # live reload (dev bundle in examples
 go run ./cmd/mygo build examples/todo      # .app + .dmg in examples/todo/build
 go run ./examples/gallery                  # the native UI toolkit's tour
 go generate ./internal/gpu/d3d11           # recompile the Direct3D shader (on Windows)
+go generate ./internal/gpu/metal           # recompile the Metal shader (on macOS, with Xcode)
 bun run --cwd website dev                  # the website, with docs/ at /docs (see website/README.md)
 ```
 

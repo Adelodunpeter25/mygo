@@ -102,6 +102,8 @@ func (p *Painter) element(e *Element) {
 			p.textLayout(e.tl, ox, oy, ts.color, ts, newSpanPaint(e.spans))
 		case kindImage:
 			p.image(e)
+		case kindIcon:
+			p.drawIcon(e.svg, e.contentBox(), e.resolvedText().color)
 		case kindInput:
 			e.paintInput(p)
 		}
@@ -225,13 +227,21 @@ func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textS
 	}
 }
 
+// contentBox returns the element's box inside its padding and border.
+func (e *Element) contentBox() Rect {
+	return Rect{e.x + e.pad[3] + e.borderW, e.y + e.pad[0] + e.borderW, e.w - e.padX(), e.h - e.padY()}
+}
+
 func (p *Painter) image(e *Element) {
+	if s := e.svg; s != nil {
+		p.drawSVG(s, e.contentBox(), e.fit, e.radius, e.resolvedText().color)
+		return
+	}
 	img := e.image
 	if img == nil || img.w == 0 || img.h == 0 {
 		return
 	}
-	box := Rect{e.x + e.pad[3] + e.borderW, e.y + e.pad[0] + e.borderW, e.w - e.padX(), e.h - e.padY()}
-	p.drawBitmap(img, box, e.fit, e.radius)
+	p.drawBitmap(img, e.contentBox(), e.fit, e.radius)
 }
 
 func (p *Painter) drawBitmap(img *Bitmap, box Rect, fit Fit, radius [4]float32) {
@@ -335,8 +345,18 @@ func (p *Painter) Text(x, y float32, s string, size float32, c Color) {
 	p.textLayout(l, x, y, c, textStyle{size: size}, nil)
 }
 
-// Image draws a bitmap scaled to fit r.
-func (p *Painter) Image(b *Bitmap, r Rect, fit Fit) { p.drawBitmap(b, r, fit, [4]float32{}) }
+// Image draws a bitmap, or an SVG in its own colors (with the theme's text
+// color for its currentColor), scaled to fit r.
+func (p *Painter) Image(src ImageSource, r Rect, fit Fit) {
+	switch s := src.(type) {
+	case *Bitmap:
+		if s != nil && s.w > 0 && s.h > 0 {
+			p.drawBitmap(s, r, fit, [4]float32{})
+		}
+	case *SVG:
+		p.drawSVG(s, r, fit, [4]float32{}, p.rt.c.theme.Text)
+	}
+}
 
 // FocusRing draws the ring that shows the keyboard focus around r.
 func (p *Painter) FocusRing(r Rect, radius [4]float32) {

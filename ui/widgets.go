@@ -101,9 +101,19 @@ func Button(c *Context, label string) *Element { return button(c, label, false) 
 func PrimaryButton(c *Context, label string) *Element { return button(c, label, true) }
 
 func button(c *Context, label string, primary bool) *Element {
+	b := ButtonBase(c)
+	styleButton(c, b, primary)
+	if label != "" {
+		b.Children(func() { Text(c, label).SingleLine() })
+	}
+	return b
+}
+
+// styleButton gives a button the theme's look, in the accent color when
+// primary.
+func styleButton(c *Context, b *Element, primary bool) {
 	t := c.theme
-	b := Row(c).Center().Padding(6, 14).Gap(6).Radius(t.Radius).Focusable().Shrink(0)
-	b.flags |= flagClickable | flagHover
+	b.Padding(t.space(1.5), t.space(3.5)).Gap(t.space(1.5)).Radius(t.Radius)
 	base, hover, pressed, fg, border := t.Surface, t.SurfaceHover, t.SurfacePressed, t.Text, t.Border
 	if primary {
 		base, hover, pressed, fg, border = t.Accent, t.AccentHover, t.AccentPressed, t.AccentText, Color{}
@@ -122,10 +132,6 @@ func button(c *Context, label string, primary bool) *Element {
 			b.bg = hover
 		}
 	}
-	if label != "" {
-		b.Children(func() { Text(c, label).SingleLine() })
-	}
-	return b
 }
 
 // Link creates a text that opens url in the browser when clicked.
@@ -150,17 +156,10 @@ func checkPath(r Rect) *Path {
 // Checkbox creates a check box toggling *checked, with a label.
 func Checkbox(c *Context, checked *bool, label string) *Element {
 	t := c.theme
-	row := Row(c).Gap(8).Focusable().Shrink(0)
-	row.flags |= flagClickable | flagHover | flagOwnRing
-	row.widget, row.role = "Checkbox", RoleCheckBox
-	if row.Clicked() {
-		*checked = !*checked
-		row.st.changed = true
-	}
+	row := CheckboxBase(c, checked).Gap(t.space(2)).FocusRing(false)
 	on := *checked
-	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
-		box := Box(c).Size(16, 16).Radius(4).Shrink(0)
+		box := Box(c).Size(t.space(4), t.space(4)).Radius(t.space(1)).Shrink(0)
 		if on {
 			box.Background(t.Accent)
 		} else {
@@ -168,10 +167,10 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 		}
 		box.DrawOver(func(p *Painter, r Rect) {
 			if on {
-				p.StrokePath(checkPath(r), 2, t.AccentText)
+				p.StrokePath(checkPath(r), t.space(0.5), t.AccentText)
 			}
 			if row.FocusVisible() {
-				p.FocusRing(r, [4]float32{4, 4, 4, 4})
+				p.FocusRing(r, box.radius)
 			}
 		})
 		box.styleFn = func(box *Element) {
@@ -190,17 +189,10 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 // label.
 func Radio[T comparable](c *Context, selected *T, value T, label string) *Element {
 	t := c.theme
-	row := Row(c).Gap(8).Focusable().Shrink(0)
-	row.flags |= flagClickable | flagHover | flagOwnRing
-	row.widget, row.role = "Radio", RoleRadio
-	if row.Clicked() && *selected != value {
-		*selected = value
-		row.st.changed = true
-	}
+	row := RadioBase(c, selected, value).Gap(t.space(2)).FocusRing(false)
 	on := *selected == value
-	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
-		dot := Box(c).Size(16, 16).Radius(8).Shrink(0)
+		dot := Box(c).Size(t.space(4), t.space(4)).Radius(t.space(2)).Shrink(0)
 		if on {
 			dot.Background(t.Accent)
 		} else {
@@ -208,10 +200,11 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 		}
 		dot.DrawOver(func(p *Painter, r Rect) {
 			if on {
-				p.Fill(Rect{r.X + 5, r.Y + 5, 6, 6}, t.AccentText, 3)
+				d := t.space(1.5)
+				p.Fill(Rect{r.X + (r.W-d)/2, r.Y + (r.H-d)/2, d, d}, t.AccentText, d/2)
 			}
 			if row.FocusVisible() {
-				p.FocusRing(r, [4]float32{8, 8, 8, 8})
+				p.FocusRing(r, dot.radius)
 			}
 		})
 		dot.styleFn = func(dot *Element) {
@@ -229,20 +222,14 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 // Switch creates a switch toggling *on.
 func Switch(c *Context, on *bool) *Element {
 	t := c.theme
-	sw := Box(c).Size(36, 20).Radius(10).Focusable().Shrink(0)
-	sw.flags |= flagClickable | flagHover
-	sw.widget, sw.role = "Switch", RoleSwitch
-	if sw.Clicked() {
-		*on = !*on
-		sw.st.changed = true
-	}
-	sw.checked = 1 + int8(b2f(*on))
+	sw := SwitchBase(c, on).Size(t.space(9), t.space(5)).Radius(t.space(2.5))
 	pos := sw.Animate("knob", b2f(*on), 140*time.Millisecond)
 	off := t.Border.Mix(t.Text, 0.15)
 	sw.Background(off.Mix(t.Accent, pos))
 	sw.Draw(func(p *Painter, r Rect) {
-		d := r.H - 4
-		knob := Rect{r.X + 2 + pos*(r.W-r.H), r.Y + 2, d, d}
+		in := t.space(0.5)
+		d := r.H - 2*in
+		knob := Rect{r.X + in + pos*(r.W-r.H), r.Y + in, d, d}
 		p.Shadow(Rect{knob.X, knob.Y + 1, knob.W, knob.H}, d/2, 3, RGBA(0, 0, 0, 0.25))
 		p.Fill(knob, RGB(255, 255, 255), d/2)
 	})
@@ -252,45 +239,19 @@ func Switch(c *Context, on *bool) *Element {
 // Slider creates a slider setting *value between lo and hi.
 func Slider(c *Context, value *float64, lo, hi float64) *Element {
 	t := c.theme
-	s := Box(c).Height(20).MinWidth(80).Focusable()
-	s.flags |= flagDraggable | flagHover | flagOwnRing
-	s.widget = "Slider"
-	st := s.st
-	set := func(v float64) {
-		v = math.Max(lo, math.Min(hi, v))
-		if v != *value {
-			*value = v
-			st.changed = true
-			c.rt.consumed = true
-		}
-	}
-	const knob = 16
-	if st.pressed && st.w > knob {
-		frac := (c.rt.pointerX - st.x - knob/2) / (st.w - knob)
-		set(lo + float64(max(0, min(1, frac)))*(hi-lo))
-	}
-	step := (hi - lo) / 100
-	if s.Shortcut(0, KeyLeft) || s.Shortcut(0, KeyDown) {
-		set(*value - step)
-	}
-	if s.Shortcut(0, KeyRight) || s.Shortcut(0, KeyUp) {
-		set(*value + step)
-	}
-	if s.Shortcut(0, KeyHome) {
-		set(lo)
-	}
-	if s.Shortcut(0, KeyEnd) {
-		set(hi)
-	}
+	// The knob moves across the content box, half of it inside the
+	// padding on each side.
+	knob := t.space(4)
+	s := SliderBase(c, value, lo, hi).Height(t.space(5)).MinWidth(t.space(20)).PaddingX(knob / 2).FocusRing(false)
 	frac := float32(0)
 	if hi > lo {
 		frac = float32((*value - lo) / (hi - lo))
 	}
-	s.role, s.hasRange, s.accRange = RoleSlider, true, [3]float64{lo, hi, *value}
 	s.Draw(func(p *Painter, r Rect) {
-		track := Rect{r.X + knob/2, r.Y + r.H/2 - 2, r.W - knob, 4}
-		p.Fill(track, t.Border.Mix(t.Text, 0.1), 2)
-		p.Fill(Rect{track.X, track.Y, track.W * frac, 4}, t.Accent, 2)
+		h := t.space(1)
+		track := Rect{r.X + knob/2, r.Y + r.H/2 - h/2, r.W - knob, h}
+		p.Fill(track, t.Border.Mix(t.Text, 0.1), h/2)
+		p.Fill(Rect{track.X, track.Y, track.W * frac, h}, t.Accent, h/2)
 		k := Rect{r.X + (r.W-knob)*frac, r.Y + r.H/2 - knob/2, knob, knob}
 		p.Shadow(Rect{k.X, k.Y + 1, k.W, k.H}, knob/2, 3, RGBA(0, 0, 0, 0.3))
 		p.Fill(k, RGB(255, 255, 255), knob/2)
@@ -306,7 +267,8 @@ func Slider(c *Context, value *float64, lo, hi float64) *Element {
 // negative value shows activity of unknown length.
 func Progress(c *Context, value float64) *Element {
 	t := c.theme
-	e := Box(c).Height(6).Radius(3).Background(t.Border).Clip()
+	rad := t.space(0.75)
+	e := Box(c).Height(t.space(1.5)).Radius(rad).Background(t.Border).Clip()
 	e.role, e.hasRange, e.accRange = RoleProgress, true, [3]float64{0, 1, value}
 	now := c.now
 	if value < 0 {
@@ -314,13 +276,13 @@ func Progress(c *Context, value float64) *Element {
 	}
 	e.Draw(func(p *Painter, r Rect) {
 		if value >= 0 {
-			p.Fill(Rect{r.X, r.Y, r.W * float32(math.Min(value, 1)), r.H}, t.Accent, 3)
+			p.Fill(Rect{r.X, r.Y, r.W * float32(math.Min(value, 1)), r.H}, t.Accent, rad)
 			return
 		}
 		phase := float32(now.UnixMilli()%1400) / 1400
 		w := r.W * 0.3
 		x := r.X - w + (r.W+w)*phase
-		p.Clip(r, 3, func() { p.Fill(Rect{x, r.Y, w, r.H}, t.Accent, 3) })
+		p.Clip(r, rad, func() { p.Fill(Rect{x, r.Y, w, r.H}, t.Accent, rad) })
 	})
 	return e
 }
@@ -392,15 +354,55 @@ func DecodeBitmap(data []byte) (*Bitmap, error) {
 // Size returns the bitmap's size in pixels, which Image shows as DIPs.
 func (b *Bitmap) Size() (w, h int) { return b.w, b.h }
 
-// Image creates an element showing a bitmap, by default at its size in
-// pixels as DIPs, scaled to fit when given another size.
-func Image(c *Context, b *Bitmap) *Element {
+func (b *Bitmap) imageSize() (float32, float32) {
+	if b == nil {
+		return 0, 0
+	}
+	return float32(b.w), float32(b.h)
+}
+
+// ImageSource is what Image shows: a *Bitmap, or an *SVG in its own
+// colors.
+type ImageSource interface {
+	imageSize() (w, h float32)
+}
+
+// Image creates an element showing a bitmap, or an SVG in its own colors
+// (with the text color for its currentColor), by default at its size as
+// DIPs, scaled to fit when given another size.
+func Image(c *Context, src ImageSource) *Element {
 	e := c.newElement(kindImage)
-	e.image = b
-	if b != nil && b.h > 0 {
-		e.aspect = float32(b.w) / float32(b.h)
+	switch s := src.(type) {
+	case *Bitmap:
+		e.image = s
+	case *SVG:
+		e.svg = s
+	}
+	if src != nil {
+		if w, h := src.imageSize(); h > 0 {
+			e.aspect = w / h
+		}
 	}
 	return e
+}
+
+// intrinsicSize returns the size of an image's picture, or of an icon: as
+// high as the font size.
+func (e *Element) intrinsicSize() (w, h float32) {
+	switch e.kind {
+	case kindImage:
+		if e.image != nil {
+			return e.image.imageSize()
+		}
+		return e.svg.imageSize()
+	case kindIcon:
+		em := e.resolvedText().size
+		if s := e.svg; s != nil && s.h > 0 {
+			return em * s.w / s.h, em
+		}
+		return em, em
+	}
+	return 0, 0
 }
 
 // Fit sets how an Image fills its box.
@@ -427,11 +429,11 @@ func (e *Element) Tooltip(s string) *Element {
 	t := c.theme
 	x, y := rt.pointerX+12, rt.pointerY+18
 	Overlay(c, func() {
-		tip := Box(c).Absolute().Left(x).Top(y).MaxWidth(320).Padding(5, 8).Radius(5).
+		tip := Box(c).Absolute().Left(x).Top(y).MaxWidth(t.space(80)).Padding(t.space(1.25), t.space(2)).Radius(t.space(1.25)).
 			Background(t.Text).TextColor(t.Background).FontSize(t.FontSize - 1).PassThrough().Role(RoleTooltip)
 		tip.Shadow(0, 2, 8, 0, RGBA(0, 0, 0, 0.2))
 		tip.Children(func() { Text(c, s) })
-		keepInWindow(c, tip, x, y, y-30)
+		keepInWindow(tip, x, y, y-30)
 	})
 	return e
 }
@@ -452,21 +454,12 @@ func Modal(c *Context, open *bool, fn func()) *Element {
 		return nil
 	}
 	t := c.theme
-	var panel *Element
-	Overlay(c, func() {
-		back := Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Background(RGBA(0, 0, 0, 0.4)).Center()
-		back.flags |= flagClickable
-		if back.Clicked() || c.Shortcut(0, KeyEscape) {
-			*open = false
-		}
-		back.Children(func() {
-			panel = Box(c).Padding(20).Gap(12).Radius(10).Background(t.Background).MaxWidth(c.w - 40).MaxHeight(c.h - 40).Role(RoleDialog)
-			panel.Shadow(0, 10, 30, 0, RGBA(0, 0, 0, 0.3))
-			panel.flags |= flagClickable
-			panel.Children(fn)
-		})
+	return DialogBase(c, open, func(back, panel *Element) {
+		back.Background(RGBA(0, 0, 0, 0.4))
+		panel.Padding(t.space(5)).Gap(t.space(3)).Radius(t.space(2.5)).Background(t.Background).MaxWidth(c.w - t.space(10)).MaxHeight(c.h - t.space(10))
+		panel.Shadow(0, 10, 30, 0, RGBA(0, 0, 0, 0.3))
+		fn()
 	})
-	return panel
 }
 
 // Popover shows fn's elements in a panel below anchor while *open is
@@ -475,63 +468,44 @@ func Popover(c *Context, anchor *Element, open *bool, fn func()) *Element {
 	if !*open {
 		return nil
 	}
-	t := c.theme
-	b := anchor.Bounds()
-	var panel *Element
-	Overlay(c, func() {
-		back := Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0)
-		back.flags |= flagClickable
-		if back.Clicked() || c.Shortcut(0, KeyEscape) {
-			*open = false
-		}
-		panel = Box(c).Absolute().Left(b.X).Top(b.Y+b.H+4).MinWidth(b.W).Padding(4).Radius(t.Radius+2).
-			Background(t.Background).Border(1, t.Border).Role(RolePopup)
-		panel.Shadow(0, 6, 20, 0, RGBA(0, 0, 0, 0.18))
-		panel.flags |= flagClickable
-		panel.Children(fn)
-		keepInWindow(c, panel, b.X, b.Y+b.H+4, b.Y-4)
+	return PopoverBase(c, anchor, open, func(panel *Element) {
+		panel.MinWidth(anchor.Bounds().W)
+		stylePanel(c, panel)
+		fn()
 	})
-	return panel
+}
+
+// stylePanel gives the panel of a popup the theme's look.
+func stylePanel(c *Context, panel *Element) {
+	t := c.theme
+	panel.Margin(t.space(1), 0, 0, 0).Padding(t.space(1)).Radius(t.Radius+2).Background(t.Background).Border(1, t.Border)
+	panel.Shadow(0, 6, 20, 0, RGBA(0, 0, 0, 0.18))
 }
 
 // Select creates a drop-down choosing one of options into *selected.
 func Select(c *Context, selected *string, options []string) *Element {
 	t := c.theme
-	b := Button(c, "")
-	b.widget, b.role, b.accValue = "Select", RolePopUpButton, *selected
-	b.Justify(SpaceBetween).MinWidth(140)
-	open := Local(b, "open", func() bool { return false })
-	if b.Clicked() {
-		*open = !*open
-	}
-	b.expanded = *open
+	sel := SelectBase(c, selected)
+	b := sel.Trigger
+	styleButton(c, b, false)
+	b.Justify(SpaceBetween).MinWidth(t.space(35))
 	b.Children(func() {
 		Text(c, *selected).SingleLine()
-		Box(c).Size(10, 10).Shrink(0).Draw(func(p *Painter, r Rect) {
+		Box(c).Size(t.space(2.5), t.space(2.5)).Shrink(0).Draw(func(p *Painter, r Rect) {
 			var path Path
-			path.MoveTo(r.X+1, r.Y+3).LineTo(r.X+5, r.Y+7).LineTo(r.X+9, r.Y+3)
+			path.MoveTo(r.X+r.W*0.1, r.Y+r.H*0.3).LineTo(r.X+r.W*0.5, r.Y+r.H*0.7).LineTo(r.X+r.W*0.9, r.Y+r.H*0.3)
 			p.StrokePath(&path, 1.5, t.TextMuted)
 		})
 	})
-	Popover(c, b, open, func() {
+	sel.Popup(func(panel *Element) {
+		stylePanel(c, panel)
 		for _, opt := range options {
-			item := Row(c).Key(opt).Padding(6, 10).Radius(t.Radius)
-			item.flags |= flagClickable | flagHover
-			if opt == *selected {
+			item := sel.Item(opt).Padding(t.space(1.5), t.space(2.5)).Radius(t.Radius)
+			switch {
+			case item.Highlighted():
+				item.Background(t.Accent).TextColor(t.AccentText)
+			case opt == *selected:
 				item.Background(t.Surface)
-			}
-			if item.Clicked() {
-				if *selected != opt {
-					*selected = opt
-					b.st.changed = true
-				}
-				*open = false
-			}
-			item.styleFn = func(item *Element) {
-				if item.Hovered() {
-					item.bg = t.Accent
-					item.ts.color, item.ts.set = t.AccentText, item.ts.set|setColor
-				}
 			}
 			item.Children(func() { Text(c, opt).SingleLine() })
 		}
@@ -539,20 +513,32 @@ func Select(c *Context, selected *string, options []string) *Element {
 	return b
 }
 
-// keepInWindow moves an overlay element placed at (x, y) so that it fits
-// in the window, by the size it had in the last frame: left when it would
-// overflow the right edge, above (ending at aboveY) when it would overflow
-// the bottom. Without a last frame it asks for another one to settle.
-func keepInWindow(c *Context, e *Element, x, y, aboveY float32) {
-	b := e.Bounds()
-	if b.W == 0 && b.H == 0 {
-		c.AnimationFrame()
-		return
+// keepInWindow places an overlay element at (x, y), where the layout,
+// which knows its size, moves it to fit in the window: left when it would
+// overflow the right edge, above, ending at aboveY, when it would
+// overflow the bottom. A top margin keeps it apart from what it is above
+// or below.
+func keepInWindow(e *Element, x, y, aboveY float32) {
+	e.Left(x).Top(y)
+	e.place = placement{on: true, above: aboveY}
+}
+
+// placement is where an overlay element goes when it does not fit below
+// what it belongs to: above, its bottom at above.
+type placement struct {
+	on    bool
+	above float32
+}
+
+// fit moves an absolute element w×h at (left, top) in a containing block
+// pw×ph, its placement says, to fit in the block.
+func (p placement) fit(e *Element, left, top, w, h, pw, ph float32) (float32, float32) {
+	if left+e.margin[3]+w > pw-4 {
+		left = max(4-e.margin[3], pw-4-w-e.margin[3])
 	}
-	if x+b.W > c.w-4 {
-		e.Left(max(4, c.w-4-b.W))
+	m := e.margin[0]
+	if top+m+h > ph-4 && p.above-m-h > 4 {
+		top = p.above - h - 2*m
 	}
-	if y+b.H > c.h-4 && aboveY-b.H > 4 {
-		e.Top(aboveY - b.H)
-	}
+	return left, top
 }

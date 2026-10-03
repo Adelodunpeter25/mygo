@@ -171,3 +171,28 @@ func (z *Rasterizer) Mask(dst []byte, stride int) {
 		}
 	}
 }
+
+// MaskEvenOdd is Mask with the even-odd rule: what the path's contours
+// cover an odd number of times is inside it.
+func (z *Rasterizer) MaskEvenOdd(dst []byte, stride int) {
+	z.ClosePath()
+	for y := 0; y < z.h; y++ {
+		var acc float32
+		row := z.acc[y*z.w : (y+1)*z.w]
+		out := dst[y*stride:]
+		for x, v := range row {
+			acc += v
+			a := acc
+			if a < 0 {
+				a = -a
+			}
+			// Fold the winding number: 0, 2, 4… are outside, 1, 3, 5…
+			// inside, and coverage in between ramps.
+			a -= 2 * float32(int(a/2))
+			if a > 1 {
+				a = 2 - a
+			}
+			out[x] = uint8(a*255 + 0.5)
+		}
+	}
+}

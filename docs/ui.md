@@ -219,8 +219,18 @@ if c.Theme().Dark {
 	t = *ui.DarkTheme()
 }
 t.Accent, t.Radius = ui.Hex("#7c3aed"), 8
+t.Spacing = 3 // compact
 c.SetTheme(&t)
 ```
+
+`Spacing` is the unit of the room widgets leave: their paddings and gaps,
+and the sizes of check boxes, switches, sliders and the rows of tables and
+trees, are multiples of it. It is 4 by default; 3 makes every widget
+compact, 5 roomy. `FontSize` sizes their text, and `Radius` rounds their
+corners.
+
+A widget returns its element, so a call after it styles it differently
+from the rest: `ui.Button(c, "Save").Padding(10, 20).Radius(999)`.
 
 ## Widgets
 

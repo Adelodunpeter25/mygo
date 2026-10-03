@@ -52,7 +52,7 @@ func TreeItem(c *Context, label string, open *bool, children func()) *Element {
 		parent = tb.parents[n-1]
 	}
 	branch := children != nil && open != nil
-	item := Row(c).Height(28).Gap(2).AlignItems(Center).Padding(0, 8, 0, 4+float32(tb.depth)*16).Focusable().Shrink(0).Role(RoleTreeItem)
+	item := Row(c).Height(t.space(7)).Gap(t.space(0.5)).AlignItems(Center).Padding(0, t.space(2), 0, t.space(1+4*float32(tb.depth))).Focusable().Shrink(0).Role(RoleTreeItem)
 	item.widget = "TreeItem"
 	item.flags |= flagClickable | flagHover | flagOwnRing
 	tb.items = append(tb.items, item.id)
@@ -102,7 +102,7 @@ func TreeItem(c *Context, label string, open *bool, children func()) *Element {
 	})
 	item.Radius(t.Radius)
 	item.Children(func() {
-		arrow := Box(c).Size(16, 16).Shrink(0).Role(RoleNone)
+		arrow := Box(c).Size(t.space(4), t.space(4)).Shrink(0).Role(RoleNone)
 		if branch {
 			arrow.flags |= flagClickable
 			if arrow.Clicked() {
@@ -112,9 +112,9 @@ func TreeItem(c *Context, label string, open *bool, children func()) *Element {
 			arrow.Draw(func(p *Painter, r Rect) {
 				var path Path
 				if expanded {
-					path.MoveTo(r.X+4, r.Y+6).LineTo(r.X+8, r.Y+10).LineTo(r.X+12, r.Y+6)
+					path.MoveTo(r.X+r.W/4, r.Y+r.H*3/8).LineTo(r.X+r.W/2, r.Y+r.H*5/8).LineTo(r.X+r.W*3/4, r.Y+r.H*3/8)
 				} else {
-					path.MoveTo(r.X+6, r.Y+4).LineTo(r.X+10, r.Y+8).LineTo(r.X+6, r.Y+12)
+					path.MoveTo(r.X+r.W*3/8, r.Y+r.H/4).LineTo(r.X+r.W*5/8, r.Y+r.H/2).LineTo(r.X+r.W*3/8, r.Y+r.H*3/4)
 				}
 				p.StrokePath(&path, 1.5, t.TextMuted)
 			})

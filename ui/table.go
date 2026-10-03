@@ -8,9 +8,6 @@ type TableColumn struct {
 	Align Align
 }
 
-// tableRow is the height of the rows of a Table.
-const tableRow = 32
-
 // Table creates a table of n rows under a header of columns, which only
 // builds the rows in view: cell builds the content of a row's column,
 // usually a Text. With selected, a click chooses a row, as Up and Down do
@@ -31,6 +28,8 @@ const tableRow = 32
 //	}
 func Table(c *Context, columns []TableColumn, n int, selected *int, cell func(row, col int)) *Element {
 	t := c.theme
+	// The height of its rows.
+	tableRow := t.space(8)
 	table := Column(c).Role(RoleTable).Focusable().Clip()
 	table.widget = "Table"
 	table.flags |= flagOwnRing
@@ -66,7 +65,7 @@ func Table(c *Context, columns []TableColumn, n int, selected *int, cell func(ro
 	// cells builds a row's cells, with fill building the content of each.
 	cells := func(role Role, fill func(col int)) {
 		for j, col := range columns {
-			box := Row(c).Padding(0, 10).AlignItems(Center).Shrink(0).Clip().Role(role)
+			box := Row(c).Padding(0, t.space(2.5)).AlignItems(Center).Shrink(0).Clip().Role(role)
 			if col.Width > 0 {
 				box.Width(col.Width)
 			} else {

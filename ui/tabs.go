@@ -14,7 +14,7 @@ package ui
 // Changed reports a new choice.
 func Tabs(c *Context, selected *int, labels ...string) *Element {
 	t := c.theme
-	list := Row(c).Gap(4).Shrink(0).Role(RoleTabList)
+	list := Row(c).Gap(t.space(1)).Shrink(0).Role(RoleTabList)
 	list.widget = "Tabs"
 	n := len(labels)
 	if n == 0 {
@@ -34,7 +34,7 @@ func Tabs(c *Context, selected *int, labels ...string) *Element {
 	}
 	list.Children(func() {
 		for i, label := range labels {
-			tab := Row(c).Padding(8, 12).Focusable().Shrink(0).Role(RoleTab)
+			tab := Row(c).Padding(t.space(2), t.space(3)).Focusable().Shrink(0).Role(RoleTab)
 			tab.widget = "Tab"
 			tab.flags |= flagClickable | flagHover | flagOwnRing
 			if tab.Clicked() {
@@ -68,7 +68,8 @@ func Tabs(c *Context, selected *int, labels ...string) *Element {
 			}
 			tab.DrawOver(func(p *Painter, r Rect) {
 				if on {
-					p.Fill(Rect{r.X + 6, r.Y + r.H - 2, r.W - 12, 2}, t.Accent, 1)
+					in, h := t.space(1.5), t.space(0.5)
+					p.Fill(Rect{r.X + in, r.Y + r.H - h, r.W - 2*in, h}, t.Accent, h/2)
 				}
 				if tab.FocusVisible() {
 					p.FocusRing(r, [4]float32{t.Radius, t.Radius, t.Radius, t.Radius})

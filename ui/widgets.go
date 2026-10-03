@@ -102,7 +102,7 @@ func PrimaryButton(c *Context, label string) *Element { return button(c, label, 
 
 func button(c *Context, label string, primary bool) *Element {
 	t := c.theme
-	b := Row(c).Center().Padding(6, 14).Gap(6).Radius(t.Radius).Focusable().Shrink(0)
+	b := Row(c).Center().Padding(t.space(1.5), t.space(3.5)).Gap(t.space(1.5)).Radius(t.Radius).Focusable().Shrink(0)
 	b.flags |= flagClickable | flagHover
 	base, hover, pressed, fg, border := t.Surface, t.SurfaceHover, t.SurfacePressed, t.Text, t.Border
 	if primary {
@@ -150,7 +150,7 @@ func checkPath(r Rect) *Path {
 // Checkbox creates a check box toggling *checked, with a label.
 func Checkbox(c *Context, checked *bool, label string) *Element {
 	t := c.theme
-	row := Row(c).Gap(8).Focusable().Shrink(0)
+	row := Row(c).Gap(t.space(2)).Focusable().Shrink(0)
 	row.flags |= flagClickable | flagHover | flagOwnRing
 	row.widget, row.role = "Checkbox", RoleCheckBox
 	if row.Clicked() {
@@ -160,7 +160,7 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 	on := *checked
 	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
-		box := Box(c).Size(16, 16).Radius(4).Shrink(0)
+		box := Box(c).Size(t.space(4), t.space(4)).Radius(t.space(1)).Shrink(0)
 		if on {
 			box.Background(t.Accent)
 		} else {
@@ -168,10 +168,10 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 		}
 		box.DrawOver(func(p *Painter, r Rect) {
 			if on {
-				p.StrokePath(checkPath(r), 2, t.AccentText)
+				p.StrokePath(checkPath(r), t.space(0.5), t.AccentText)
 			}
 			if row.FocusVisible() {
-				p.FocusRing(r, [4]float32{4, 4, 4, 4})
+				p.FocusRing(r, box.radius)
 			}
 		})
 		box.styleFn = func(box *Element) {
@@ -190,7 +190,7 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 // label.
 func Radio[T comparable](c *Context, selected *T, value T, label string) *Element {
 	t := c.theme
-	row := Row(c).Gap(8).Focusable().Shrink(0)
+	row := Row(c).Gap(t.space(2)).Focusable().Shrink(0)
 	row.flags |= flagClickable | flagHover | flagOwnRing
 	row.widget, row.role = "Radio", RoleRadio
 	if row.Clicked() && *selected != value {
@@ -200,7 +200,7 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 	on := *selected == value
 	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
-		dot := Box(c).Size(16, 16).Radius(8).Shrink(0)
+		dot := Box(c).Size(t.space(4), t.space(4)).Radius(t.space(2)).Shrink(0)
 		if on {
 			dot.Background(t.Accent)
 		} else {
@@ -208,10 +208,11 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 		}
 		dot.DrawOver(func(p *Painter, r Rect) {
 			if on {
-				p.Fill(Rect{r.X + 5, r.Y + 5, 6, 6}, t.AccentText, 3)
+				d := t.space(1.5)
+				p.Fill(Rect{r.X + (r.W-d)/2, r.Y + (r.H-d)/2, d, d}, t.AccentText, d/2)
 			}
 			if row.FocusVisible() {
-				p.FocusRing(r, [4]float32{8, 8, 8, 8})
+				p.FocusRing(r, dot.radius)
 			}
 		})
 		dot.styleFn = func(dot *Element) {
@@ -229,7 +230,7 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 // Switch creates a switch toggling *on.
 func Switch(c *Context, on *bool) *Element {
 	t := c.theme
-	sw := Box(c).Size(36, 20).Radius(10).Focusable().Shrink(0)
+	sw := Box(c).Size(t.space(9), t.space(5)).Radius(t.space(2.5)).Focusable().Shrink(0)
 	sw.flags |= flagClickable | flagHover
 	sw.widget, sw.role = "Switch", RoleSwitch
 	if sw.Clicked() {
@@ -241,8 +242,9 @@ func Switch(c *Context, on *bool) *Element {
 	off := t.Border.Mix(t.Text, 0.15)
 	sw.Background(off.Mix(t.Accent, pos))
 	sw.Draw(func(p *Painter, r Rect) {
-		d := r.H - 4
-		knob := Rect{r.X + 2 + pos*(r.W-r.H), r.Y + 2, d, d}
+		in := t.space(0.5)
+		d := r.H - 2*in
+		knob := Rect{r.X + in + pos*(r.W-r.H), r.Y + in, d, d}
 		p.Shadow(Rect{knob.X, knob.Y + 1, knob.W, knob.H}, d/2, 3, RGBA(0, 0, 0, 0.25))
 		p.Fill(knob, RGB(255, 255, 255), d/2)
 	})
@@ -252,7 +254,7 @@ func Switch(c *Context, on *bool) *Element {
 // Slider creates a slider setting *value between lo and hi.
 func Slider(c *Context, value *float64, lo, hi float64) *Element {
 	t := c.theme
-	s := Box(c).Height(20).MinWidth(80).Focusable()
+	s := Box(c).Height(t.space(5)).MinWidth(t.space(20)).Focusable()
 	s.flags |= flagDraggable | flagHover | flagOwnRing
 	s.widget = "Slider"
 	st := s.st
@@ -264,7 +266,7 @@ func Slider(c *Context, value *float64, lo, hi float64) *Element {
 			c.rt.consumed = true
 		}
 	}
-	const knob = 16
+	knob := t.space(4)
 	if st.pressed && st.w > knob {
 		frac := (c.rt.pointerX - st.x - knob/2) / (st.w - knob)
 		set(lo + float64(max(0, min(1, frac)))*(hi-lo))
@@ -288,9 +290,10 @@ func Slider(c *Context, value *float64, lo, hi float64) *Element {
 	}
 	s.role, s.hasRange, s.accRange = RoleSlider, true, [3]float64{lo, hi, *value}
 	s.Draw(func(p *Painter, r Rect) {
-		track := Rect{r.X + knob/2, r.Y + r.H/2 - 2, r.W - knob, 4}
-		p.Fill(track, t.Border.Mix(t.Text, 0.1), 2)
-		p.Fill(Rect{track.X, track.Y, track.W * frac, 4}, t.Accent, 2)
+		h := t.space(1)
+		track := Rect{r.X + knob/2, r.Y + r.H/2 - h/2, r.W - knob, h}
+		p.Fill(track, t.Border.Mix(t.Text, 0.1), h/2)
+		p.Fill(Rect{track.X, track.Y, track.W * frac, h}, t.Accent, h/2)
 		k := Rect{r.X + (r.W-knob)*frac, r.Y + r.H/2 - knob/2, knob, knob}
 		p.Shadow(Rect{k.X, k.Y + 1, k.W, k.H}, knob/2, 3, RGBA(0, 0, 0, 0.3))
 		p.Fill(k, RGB(255, 255, 255), knob/2)
@@ -306,7 +309,8 @@ func Slider(c *Context, value *float64, lo, hi float64) *Element {
 // negative value shows activity of unknown length.
 func Progress(c *Context, value float64) *Element {
 	t := c.theme
-	e := Box(c).Height(6).Radius(3).Background(t.Border).Clip()
+	rad := t.space(0.75)
+	e := Box(c).Height(t.space(1.5)).Radius(rad).Background(t.Border).Clip()
 	e.role, e.hasRange, e.accRange = RoleProgress, true, [3]float64{0, 1, value}
 	now := c.now
 	if value < 0 {
@@ -314,13 +318,13 @@ func Progress(c *Context, value float64) *Element {
 	}
 	e.Draw(func(p *Painter, r Rect) {
 		if value >= 0 {
-			p.Fill(Rect{r.X, r.Y, r.W * float32(math.Min(value, 1)), r.H}, t.Accent, 3)
+			p.Fill(Rect{r.X, r.Y, r.W * float32(math.Min(value, 1)), r.H}, t.Accent, rad)
 			return
 		}
 		phase := float32(now.UnixMilli()%1400) / 1400
 		w := r.W * 0.3
 		x := r.X - w + (r.W+w)*phase
-		p.Clip(r, 3, func() { p.Fill(Rect{x, r.Y, w, r.H}, t.Accent, 3) })
+		p.Clip(r, rad, func() { p.Fill(Rect{x, r.Y, w, r.H}, t.Accent, rad) })
 	})
 	return e
 }
@@ -467,7 +471,7 @@ func (e *Element) Tooltip(s string) *Element {
 	t := c.theme
 	x, y := rt.pointerX+12, rt.pointerY+18
 	Overlay(c, func() {
-		tip := Box(c).Absolute().Left(x).Top(y).MaxWidth(320).Padding(5, 8).Radius(5).
+		tip := Box(c).Absolute().Left(x).Top(y).MaxWidth(t.space(80)).Padding(t.space(1.25), t.space(2)).Radius(t.space(1.25)).
 			Background(t.Text).TextColor(t.Background).FontSize(t.FontSize - 1).PassThrough().Role(RoleTooltip)
 		tip.Shadow(0, 2, 8, 0, RGBA(0, 0, 0, 0.2))
 		tip.Children(func() { Text(c, s) })
@@ -500,7 +504,7 @@ func Modal(c *Context, open *bool, fn func()) *Element {
 			*open = false
 		}
 		back.Children(func() {
-			panel = Box(c).Padding(20).Gap(12).Radius(10).Background(t.Background).MaxWidth(c.w - 40).MaxHeight(c.h - 40).Role(RoleDialog)
+			panel = Box(c).Padding(t.space(5)).Gap(t.space(3)).Radius(t.space(2.5)).Background(t.Background).MaxWidth(c.w - t.space(10)).MaxHeight(c.h - t.space(10)).Role(RoleDialog)
 			panel.Shadow(0, 10, 30, 0, RGBA(0, 0, 0, 0.3))
 			panel.flags |= flagClickable
 			panel.Children(fn)
@@ -524,12 +528,13 @@ func Popover(c *Context, anchor *Element, open *bool, fn func()) *Element {
 		if back.Clicked() || c.Shortcut(0, KeyEscape) {
 			*open = false
 		}
-		panel = Box(c).Absolute().Left(b.X).Top(b.Y+b.H+4).MinWidth(b.W).Padding(4).Radius(t.Radius+2).
+		gap := t.space(1)
+		panel = Box(c).Absolute().Left(b.X).Top(b.Y+b.H+gap).MinWidth(b.W).Padding(t.space(1)).Radius(t.Radius+2).
 			Background(t.Background).Border(1, t.Border).Role(RolePopup)
 		panel.Shadow(0, 6, 20, 0, RGBA(0, 0, 0, 0.18))
 		panel.flags |= flagClickable
 		panel.Children(fn)
-		keepInWindow(c, panel, b.X, b.Y+b.H+4, b.Y-4)
+		keepInWindow(c, panel, b.X, b.Y+b.H+gap, b.Y-gap)
 	})
 	return panel
 }
@@ -539,7 +544,7 @@ func Select(c *Context, selected *string, options []string) *Element {
 	t := c.theme
 	b := Button(c, "")
 	b.widget, b.role, b.accValue = "Select", RolePopUpButton, *selected
-	b.Justify(SpaceBetween).MinWidth(140)
+	b.Justify(SpaceBetween).MinWidth(t.space(35))
 	open := Local(b, "open", func() bool { return false })
 	if b.Clicked() {
 		*open = !*open
@@ -547,15 +552,15 @@ func Select(c *Context, selected *string, options []string) *Element {
 	b.expanded = *open
 	b.Children(func() {
 		Text(c, *selected).SingleLine()
-		Box(c).Size(10, 10).Shrink(0).Draw(func(p *Painter, r Rect) {
+		Box(c).Size(t.space(2.5), t.space(2.5)).Shrink(0).Draw(func(p *Painter, r Rect) {
 			var path Path
-			path.MoveTo(r.X+1, r.Y+3).LineTo(r.X+5, r.Y+7).LineTo(r.X+9, r.Y+3)
+			path.MoveTo(r.X+r.W*0.1, r.Y+r.H*0.3).LineTo(r.X+r.W*0.5, r.Y+r.H*0.7).LineTo(r.X+r.W*0.9, r.Y+r.H*0.3)
 			p.StrokePath(&path, 1.5, t.TextMuted)
 		})
 	})
 	Popover(c, b, open, func() {
 		for _, opt := range options {
-			item := Row(c).Key(opt).Padding(6, 10).Radius(t.Radius)
+			item := Row(c).Key(opt).Padding(t.space(1.5), t.space(2.5)).Radius(t.Radius)
 			item.flags |= flagClickable | flagHover
 			if opt == *selected {
 				item.Background(t.Surface)

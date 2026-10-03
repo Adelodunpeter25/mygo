@@ -625,9 +625,9 @@ func textInput(c *Context, value *string, multiline bool) *Element {
 	if !focused {
 		ed.compose = ""
 	}
-	e.Padding(6, 10).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
+	e.Padding(t.space(1.5), t.space(2.5)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
 	if multiline {
-		e.MinHeight(80)
+		e.MinHeight(t.space(20))
 	}
 	e.styleFn = func(e *Element) {
 		if e.Focused() {

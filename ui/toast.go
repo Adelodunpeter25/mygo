@@ -49,11 +49,11 @@ func (rt *engine) buildToasts(c *Context) {
 	}
 	t := c.theme
 	Overlay(c, func() {
-		stack := Column(c).Absolute().Left(0).Right(0).Bottom(24).AlignItems(Center).Gap(8).PassThrough()
+		stack := Column(c).Absolute().Left(0).Right(0).Bottom(t.space(6)).AlignItems(Center).Gap(t.space(2)).PassThrough()
 		stack.Children(func() {
 			for _, ts := range live {
 				age := c.now.Sub(ts.at)
-				box := Row(c).Key(ts.id).Padding(10, 16).Radius(8).MaxWidth(c.w - 48).
+				box := Row(c).Key(ts.id).Padding(t.space(2.5), t.space(4)).Radius(t.space(2)).MaxWidth(c.w - t.space(12)).
 					Background(t.Text).TextColor(t.Background).Role(RoleStatus)
 				box.Shadow(0, 6, 20, 0, RGBA(0, 0, 0, 0.25))
 				// It fades in, and out at the end.

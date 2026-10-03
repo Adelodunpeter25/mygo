@@ -300,6 +300,14 @@ type flexLine struct {
 	cross      float32
 }
 
+// flexScratch holds the items and lines of the flex containers being laid
+// out, a nested container's after its parent's, reusing their memory
+// frame after frame.
+type flexScratch struct {
+	items []flexItem
+	lines []flexLine
+}
+
 // flexLayout lays out the in-flow children in a content box cw×ch (inf
 // when unknown) and returns the size they take. With commit it gives them
 // their boxes (relative to e) and lays them out in turn.
@@ -313,7 +321,9 @@ func flexLayout(e *Element, cw, ch float32, commit bool) (usedW, usedH float32) 
 	if align == alignAuto {
 		align = Stretch
 	}
-	var items []flexItem
+	scratch := &e.c.rt.flex
+	firstItem, firstLine := len(scratch.items), len(scratch.lines)
+	defer func() { scratch.items, scratch.lines = scratch.items[:firstItem], scratch.lines[:firstLine] }()
 	for c := e.first; c != nil; c = c.next {
 		if c.flags&flagAbsolute != 0 {
 			continue
@@ -368,29 +378,31 @@ func flexLayout(e *Element, cw, ch float32, commit bool) (usedW, usedH float32) 
 			}
 		}
 		it.hyp = max(it.minMain, min(it.base, it.maxMain))
-		items = append(items, it)
+		// After the child's measures, which lay out containers in it.
+		scratch.items = append(scratch.items, it)
 	}
+	items := scratch.items[firstItem:]
 
 	// Break into lines.
-	var lines []flexLine
 	if len(items) > 0 {
 		cur := flexLine{}
 		for i := range items {
 			outer := items[i].hyp + items[i].marginMain
 			if e.wrap && finite(mainSize) && i > cur.start && cur.main+e.gap+outer > mainSize {
 				cur.end = i
-				lines = append(lines, cur)
+				scratch.lines = append(scratch.lines, cur)
 				cur = flexLine{start: i}
 			}
 			if i > cur.start {
 				cur.main += e.gap
 			}
 			cur.main += outer
-			items[i].line = len(lines)
+			items[i].line = len(scratch.lines) - firstLine
 		}
 		cur.end = len(items)
-		lines = append(lines, cur)
+		scratch.lines = append(scratch.lines, cur)
 	}
+	lines := scratch.lines[firstLine:]
 
 	// Resolve the flexible lengths of each line.
 	for li := range lines {

@@ -38,6 +38,8 @@ type engine struct {
 	c     Context
 	text  *text.System
 	scene scene.Scene
+	paths paths
+	flex  flexScratch
 
 	states map[uint64]*state
 	frame  uint64

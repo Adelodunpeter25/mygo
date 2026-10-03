@@ -39,7 +39,7 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 	h := &windowHost{conn: conn}
 	rt := newRuntime(v.view, h)
 	h.rt = rt
-	conn.Event = rt.event
+	conn.Event = h.event
 	conn.ThemeChanged = rt.themeChanged
 	conn.TitleBarChanged = rt.requestFrame
 	conn.Capture = h.capture
@@ -58,6 +58,18 @@ type windowHost struct {
 	gpuTried bool
 	soft     raster.Renderer
 	last     *scene.Scene
+	// framing tells that the surface asked for the frame being drawn.
+	framing bool
+}
+
+// event handles an event of the surface, noting when it asks for a frame:
+// only then may renderers draw (OpenGL's context is current only then).
+func (h *windowHost) event(ev platform.SurfaceEvent) bool {
+	if ev.Kind == platform.SurfaceFrame {
+		h.framing = true
+		defer func() { h.framing = false }()
+	}
+	return h.rt.event(ev)
 }
 
 // gpuRenderer draws scenes into a surface on the GPU.
@@ -77,6 +89,12 @@ func (h *windowHost) size() (float32, float32, float32) {
 func (h *windowHost) present(s *scene.Scene) {
 	h.last = s
 	if s.Width <= 0 || s.Height <= 0 {
+		return
+	}
+	if !h.framing {
+		// A frame built outside the surface's, for a capture, is shown by
+		// the surface's next.
+		h.conn.Surface.RequestFrame()
 		return
 	}
 	if !h.gpuTried {

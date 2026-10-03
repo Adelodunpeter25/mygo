@@ -50,8 +50,10 @@ type SurfaceNative struct {
 	HWND uintptr
 	// View is the surface's NSView and Layer its layer (macOS).
 	View, Layer uintptr
-	// Widget is the surface's GtkDrawingArea (Linux).
-	Widget uintptr
+	// Widget is the surface's GtkGLArea or GtkDrawingArea, and GLArea the
+	// GtkGLArea while its render signal draws a frame with OpenGL, in the
+	// context it made current (Linux).
+	Widget, GLArea uintptr
 }
 
 // RectF is a rectangle in DIPs with fractional coordinates.

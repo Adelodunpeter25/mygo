@@ -557,7 +557,7 @@ var resizeEdges = [8]struct {
 func (w *window) resizeEdge(event ptr) int32 {
 	// GdkEventMotion and GdkEventButton: window 8, x 24, y 32.
 	if !w.undecorated() || w.state&(stateMaximized|stateFullscreen) != 0 ||
-		field[ptr](event, 8) != gtkWidgetGetWindow(w.contentWidget()) || !gtkWindowGetResizable(w.win) {
+		field[ptr](event, 8) != w.contentWindow() || !gtkWindowGetResizable(w.win) {
 		return -1
 	}
 	x, y := field[float64](event, 24), field[float64](event, 32)
@@ -611,7 +611,7 @@ func (w *window) showResizeCursor(edge int32) {
 	if edge < 0 && !c.on {
 		return
 	}
-	page := gtkWidgetGetWindow(w.contentWidget())
+	page := w.contentWindow()
 	current := gdkWindowGetCursor(page)
 	if edge < 0 {
 		if c.on && current == c.shown {

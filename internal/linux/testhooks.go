@@ -293,7 +293,7 @@ func TestClickSurface(handle uintptr, x, y float64) bool {
 		return false
 	}
 	var ox, oy int32
-	origin(gtkWidgetGetWindow(w.surface.area), &ox, &oy)
+	origin(w.surface.eventWindow(), &ox, &oy)
 	scale := float64(gtkWidgetGetScaleFactor(w.surface.area))
 	if !TestMovePointer(int((float64(ox)+x)*scale), int((float64(oy)+y)*scale)) {
 		return false

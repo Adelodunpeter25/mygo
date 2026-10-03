@@ -3,9 +3,8 @@
 A window can show a user interface that MyGo draws itself instead of a web
 page. You write it in Go with package `ui`: there is no HTML, no JavaScript
 and no frontend build, and the window starts no webview, so it opens at
-once and uses little memory. MyGo draws it on the GPU, with Metal on macOS
-and Direct3D 11 on Windows; on Linux it draws on the CPU for now and hands
-the pixels to the window.
+once and uses little memory. MyGo draws it on the GPU, with Metal on macOS,
+Direct3D 11 on Windows and OpenGL on Linux.
 
 ```go
 package main
@@ -470,15 +469,17 @@ once at a given scale.
 
 ## Rendering
 
-MyGo draws on the GPU with Metal on macOS, and with Direct3D 11 on
-Windows, or with WARP, Windows' own software renderer, where no GPU driver
-works. A shader computes rounded rectangles, borders, gradients and
-shadows from the distance to their edges, so they stay sharp at any size
-and scale, and text comes from a glyph atlas that only uploads what
-changes.
+MyGo draws on the GPU with Metal on macOS, with Direct3D 11 on Windows,
+or with WARP, Windows' own software renderer, where no GPU driver works,
+and with OpenGL on Linux, in the GtkGLArea GTK shows. A shader computes
+rounded rectangles, borders, gradients and shadows from the distance to
+their edges, so they stay sharp at any size and scale, and text comes
+from a glyph atlas that only uploads what changes.
 
-On Linux it draws the same pixels on the CPU for now: a few milliseconds
-for a whole large window on a high-density display, and less than a tenth
-of one for what typically changes, such as a button under the pointer,
-since it redraws only that. Set `MYGO_GPU=0` to use the CPU renderer
-everywhere, for instance to compare.
+Where OpenGL would not run on a GPU, as in virtual machines or in WSL
+(where `GALLIUM_DRIVER=d3d12` gives Mesa the GPU), Linux draws the same
+pixels on the CPU: a few milliseconds for a whole large window on a
+high-density display, and less than a tenth of one for what typically
+changes, such as a button under the pointer, since it redraws only that.
+Set `MYGO_GPU=0` to use the CPU renderer everywhere, for instance to
+compare.

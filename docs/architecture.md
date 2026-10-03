@@ -869,11 +869,13 @@ either.
 
 - **The surface.** With `platform.WindowOptions.Surface`, a backend creates
   a view MyGo draws in place of the webview: a layer-backed NSView on
-  macOS, a GtkDrawingArea on Linux, a child window of class `MyGoSurface`
-  on Windows. `platform.Surface` gives its native handle (for a swap
-  chain), size and scale; asks for a frame (`RequestFrame`: a paused
-  `CADisplayLink`, before macOS 14 an `NSTimer` at the display's rate,
-  `gtk_widget_queue_draw`, `InvalidateRect`); presents
+  macOS, a GtkGLArea on Linux (a GtkDrawingArea where OpenGL would not run
+  on a GPU), a child window of class `MyGoSurface` on Windows.
+  `platform.Surface` gives its native handles (for a swap chain, a layer,
+  or the GtkGLArea while its `render` signal draws a frame, with its
+  context current), size and scale; asks for a frame (`RequestFrame`: a
+  paused `CADisplayLink`, before macOS 14 an `NSTimer` at the display's
+  rate, `gtk_widget_queue_draw`, `InvalidateRect`); presents
   pixels drawn on the CPU (`PresentPixels`: a CGImage as the layer's
   contents, cairo in the `draw` signal, `SetDIBitsToDevice` in `WM_PAINT`);
   sets the cursor; and turns the input method on and off at the caret
@@ -898,9 +900,10 @@ either.
   tell the system what changed between trees: subclasses of
   `NSAccessibilityElement` and AppKit's notifications on macOS; on Linux,
   ATK objects of GObject types registered through purego below the
-  accessible of a `GtkDrawingArea` subclass, with ATK's signals, which GTK
-  bridges to AT-SPI; on Windows, UI Automation fragments, COM objects with
-  control patterns, answering `WM_GETOBJECT`, with UI Automation's events.
+  accessible of a `GtkGLArea` or `GtkDrawingArea` subclass, with ATK's
+  signals, which GTK bridges to AT-SPI; on Windows, UI Automation
+  fragments, COM objects with control patterns, answering `WM_GETOBJECT`,
+  with UI Automation's events.
   What assistive technology does comes back as `AccessAction` events,
   which the engine performs as the pointer or the keyboard would.
 - **The connection.** `content.go` attaches the content to its window
@@ -967,20 +970,38 @@ either.
     the surface view's layer. Its frames present with the Core Animation
     transaction (`presentsWithTransaction`), so a live resize shows no
     stretched frames, and each frame waits for the GPU to finish the last
-    before it updates the textures and the instance buffer the last read.
+    before it updates the textures and the instance buffer the last read;
+  - `internal/gpu/gl` with the shader in GLSL 3.30 or GLSL ES 3.00, which
+    the driver compiles when the renderer starts, into the framebuffer of
+    the GtkGLArea, which GTK shows. GL functions come from libepoxy, as
+    GTK's do. Instances draw from per-instance attributes, pointed at each
+    batch's first since OpenGL ES 3.0 has no base instance.
+
+  Linux draws with OpenGL only where it runs on a GPU: the backend makes
+  one context, on a window that never shows, when the first surface is
+  created, and reads its renderer. A software renderer such as Mesa's
+  llvmpipe (in virtual machines, in WSL without `GALLIUM_DRIVER=d3d12`)
+  redraws every pixel of every frame on the CPU, ten times the CPU
+  renderer's work on an animated page; and once a window has a GL context
+  GTK composites it with OpenGL, so the choice is made before any surface
+  has one. A surface whose GL renderer fails all the same gives way to a
+  GtkDrawingArea.
 
   `internal/raster` draws the same scene with the same formulas on the CPU,
   solid spans inside shapes and only the edges of shadows computed, and
   redraws only what differs from the last scene (`raster.Renderer`): it is
-  the renderer of Linux for now, of tests and of `MYGO_GPU=0`, and the one
-  a window falls back to when its GPU renderer fails.
+  the renderer of tests, of `MYGO_GPU=0` and of Linux without a GPU, and
+  the one a window falls back to when its GPU renderer fails. Frames that
+  are not the surface's (a capture before the first frame) are kept, not
+  drawn: OpenGL's context is current only in the surface's.
 - **Tests.** `ui.Tester` runs views against a host in memory
   (`ui/headless.go`) with the CPU renderer; the fake backend's surface lets
   the core's tests drive content windows through `package mygo`.
   `BenchmarkFrame` in `ui` measures a frame of a large window on the CPU.
   The GPU renderers' tests draw `gputest.Scene` and compare it with the
   CPU renderer's drawing: on Windows in a hidden window, on macOS into an
-  offscreen texture.
+  offscreen texture, on Linux into a framebuffer of a context EGL makes
+  without a window (Mesa's surfaceless platform, llvmpipe without a GPU).
 
 A new widget composes elements (`ui/widgets.go`), keeps what it needs from
 frame to frame with `Local` or in `state`, declares its interaction with
@@ -1181,7 +1202,7 @@ profile).
 | CLI | `go test ./cmd/mygo` | config, Info.plist, icons, universal binaries, template, dev launch/ready/stop (the test binary plays the app), watcher and `go list` inputs, resources (platform directories, universal pairs, staging, conflicts, dev placement; builds for every OS), frontend embedding (compiles an app with the overlay), `.DS_Store` against a dmgbuild golden file, a real DMG (`hdiutil`); builds and tools are skipped with `-short` |
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
 | plugins | `go test ./plugins/...` | the fetch plugin against `httptest` servers, the WebSocket client against a test server (ordering, fragments, pings, closing handshakes) |
-| native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; `go test -run '^$' -bench . ./ui` times a frame |
+| native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS, OpenGL on Linux); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; `go test -run '^$' -bench . ./ui` times a frame |
 | GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open, native UI (frames, clicks, input methods replacing typed text, file drops, assistive technology reading and acting; on macOS typing, skipped while an input method is selected, and composing); on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
 
 The XDG variables let the URL scheme test check that GLib opens the scheme
@@ -1320,7 +1341,7 @@ which npm allows only for packages that exist: the first release uses an
 | content protection, click-through | yes | ignored | yes |
 | custom scheme origin | `<scheme>://localhost` | `<scheme>://localhost` | `http://<scheme>.localhost` (the page's `location`) |
 | window.open | keeps the opener | independent window | independent window |
-| native UI surface | layer-backed NSView, frames from `CADisplayLink` (a timer at the display's rate before macOS 14), input methods through NSTextInputClient | GtkDrawingArea, GtkIMMulticontext | `MyGoSurface` child window, IMM32 |
+| native UI surface | layer-backed NSView, frames from `CADisplayLink` (a timer at the display's rate before macOS 14), input methods through NSTextInputClient | GtkGLArea (GtkDrawingArea without a GPU), GtkIMMulticontext | `MyGoSurface` child window, IMM32 |
 | native UI file drops | NSDraggingDestination | GTK drag destination (`text/uri-list`) | OLE `IDropTarget` |
 | native UI accessibility | `NSAccessibilityElement` subclasses | ATK objects (GObject types registered through purego), bridged to AT-SPI by GTK | UI Automation fragments (COM objects; assembly thunks for the methods taking doubles) |
-| native UI rendering | Metal, into a CAMetalLayer presenting with the Core Animation transaction | CPU, painted with cairo | Direct3D 11 (WARP without a GPU), flip-model swap chain |
+| native UI rendering | Metal, into a CAMetalLayer presenting with the Core Animation transaction | OpenGL 3.3 or ES 3.0 in the GtkGLArea's render signal; on the CPU, painted with cairo, where OpenGL runs on the CPU | Direct3D 11 (WARP without a GPU), flip-model swap chain |

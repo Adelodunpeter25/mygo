@@ -293,7 +293,7 @@ func (rt *engine) commitElement(e *Element, clip Rect) {
 	}
 	s.flags = e.flags
 	s.cursor = e.cursor
-	if e.flags&flagEditable != 0 && s.cursor == 0 {
+	if e.flags&(flagEditable|flagSelectable) != 0 && s.cursor == 0 {
 		s.cursor = CursorText + 1
 	}
 	v := intersect(Rect{e.x, e.y, e.w, e.h}, clip)

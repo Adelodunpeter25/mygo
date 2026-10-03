@@ -46,6 +46,8 @@ type editor struct {
 	composeCaret  int
 	queue         []editEvent
 	multiline     bool
+	readOnly      bool // selectable text: selected and copied, not edited
+	source        string // the text of selectable text
 	password      bool
 	placeholder   string
 	bounds        text.Boundaries
@@ -99,6 +101,16 @@ func (ed *editor) selectAll() { ed.anchor, ed.caret = 0, len(ed.text) }
 // reach shortcuts.
 func (ed *editor) wants(k keyEvent) bool {
 	m := k.mods &^ Shift
+	if ed.readOnly {
+		// Selecting and copying; the arrows without Shift scroll.
+		switch k.key {
+		case KeyA, KeyC:
+			return k.mods == Cmd
+		case KeyLeft, KeyRight, KeyUp, KeyDown, KeyHome, KeyEnd:
+			return k.mods&Shift != 0
+		}
+		return false
+	}
 	switch k.key {
 	case KeyLeft, KeyRight, KeyHome, KeyEnd, KeyBackspace, KeyDelete:
 		return true
@@ -169,6 +181,9 @@ func (ed *editor) replace(start, end int, s string) {
 }
 
 func (ed *editor) insert(s string) {
+	if ed.readOnly {
+		return
+	}
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	a, b := ed.selection()
 	ed.record(a == b && utf8.RuneCountInString(s) == 1)
@@ -177,7 +192,7 @@ func (ed *editor) insert(s string) {
 }
 
 func (ed *editor) deleteRange(a, b int) {
-	if a == b {
+	if a == b || ed.readOnly {
 		return
 	}
 	ed.record(false)
@@ -419,6 +434,9 @@ func (ed *editor) emacsKey(key Key, shift bool) bool {
 func (ed *editor) command(c *Context, name string) {
 	a, b := ed.selection()
 	h := c.rt.host
+	if ed.readOnly && name != "copy" && name != "selectAll" {
+		return
+	}
 	switch name {
 	case "copy":
 		if a != b && !ed.password {
@@ -633,6 +651,33 @@ func (e *Element) Placeholder(s string) *Element {
 func (e *Element) Password() *Element {
 	if e.st.editor != nil {
 		e.st.editor.password = true
+	}
+	return e
+}
+
+// Selectable lets the user select the text of a Text element, by dragging
+// over it, double-clicking a word or triple-clicking a line, and copy it:
+// a click gives it the keyboard focus, for Shift with the arrows and
+// Cmd+C, and its context menu has Copy and Select All.
+func (e *Element) Selectable() *Element {
+	if e.kind != kindText {
+		return e
+	}
+	e.flags |= flagSelectable
+	st := e.st
+	ed := st.editor
+	if ed == nil {
+		ed = newEditor()
+		ed.readOnly, ed.multiline = true, true
+		st.editor = ed
+	}
+	if ed.source != e.text {
+		ed.source = e.text
+		ed.setText(e.text)
+		ed.caret, ed.anchor = 0, 0
+	}
+	if e.c.rt.focused == e.id || len(ed.queue) > 0 {
+		ed.process(e.c, e)
 	}
 	return e
 }

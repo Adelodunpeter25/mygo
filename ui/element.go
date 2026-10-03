@@ -84,6 +84,7 @@ const (
 	flagOwnRing
 	flagDropTarget
 	flagContextMenu
+	flagSelectable
 )
 
 type shadow struct {

@@ -188,7 +188,7 @@ func (rt *engine) menuTarget(chain []uint64) *state {
 		if s == nil || s.flags&flagDisabled != 0 {
 			continue
 		}
-		if s.flags&(flagContextMenu|flagEditable) != 0 {
+		if s.flags&(flagContextMenu|flagEditable|flagSelectable) != 0 {
 			return s
 		}
 	}
@@ -218,7 +218,7 @@ func (rt *engine) menuPress(chain []uint64, x, y float32) bool {
 	if s == nil {
 		return false
 	}
-	if s.flags&flagEditable != 0 && s.editor != nil {
+	if s.flags&(flagEditable|flagSelectable) != 0 && s.editor != nil {
 		if rt.focused != s.id {
 			rt.focused = s.id
 			rt.focusVisible = false
@@ -265,7 +265,7 @@ func (rt *engine) menuKey() bool {
 		return false
 	}
 	x, y := s.vx, s.vy+min(s.vh, 32)
-	if s.flags&flagEditable != 0 && s.editor != nil {
+	if s.flags&(flagEditable|flagSelectable) != 0 && s.editor != nil {
 		r := s.editor.caretRect(s)
 		x, y = r.X, r.Y+r.H
 	}
@@ -346,10 +346,12 @@ func (rt *engine) editMenu(s *state) {
 		separator = command{}
 		commands  []command
 	)
-	switch runtime.GOOS {
-	case "darwin":
+	switch {
+	case ed.readOnly:
+		commands = []command{copyText, separator, selectAll}
+	case runtime.GOOS == "darwin":
 		commands = []command{cut, copyText, paste, separator, selectAll}
-	case "windows":
+	case runtime.GOOS == "windows":
 		commands = []command{undo, separator, cut, copyText, paste, del, separator, selectAll}
 	default:
 		commands = []command{cut, copyText, paste, del, separator, selectAll}

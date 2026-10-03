@@ -91,7 +91,15 @@ func (p *Painter) element(e *Element) {
 		switch e.kind {
 		case kindText:
 			ts := e.resolvedText()
-			p.textLayout(e.tl, e.x+e.pad[3]+e.borderW, e.y+e.pad[0]+e.borderW, ts.color, ts)
+			ox, oy := e.x+e.pad[3]+e.borderW, e.y+e.pad[0]+e.borderW
+			if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 && e.Focused() {
+				if a, b := ed.selection(); a != b {
+					for _, r := range e.tl.Selection(a, b) {
+						p.Fill(Rect{ox + r.X, oy + r.Y, r.W, r.H}, e.c.theme.Selection, 0)
+					}
+				}
+			}
+			p.textLayout(e.tl, ox, oy, ts.color, ts)
 		case kindImage:
 			p.image(e)
 		case kindInput:

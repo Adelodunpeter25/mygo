@@ -136,7 +136,7 @@ func (rt *engine) pointerMove(x, y float32) {
 	if rt.pressed != nil && rt.pointerIn {
 		rt.pressed.dragX += x - rt.pointerX
 		rt.pressed.dragY += y - rt.pointerY
-		if rt.pressed.flags&(flagTrackPointer|flagDraggable|flagEditable) != 0 {
+		if rt.pressed.flags&(flagTrackPointer|flagDraggable|flagEditable|flagSelectable) != 0 {
 			rt.requestFrame()
 		}
 	}
@@ -155,7 +155,7 @@ func (rt *engine) pointerMove(x, y float32) {
 	}
 }
 
-const interactive = flagClickable | flagFocusable | flagEditable | flagDragWindow | flagDraggable | flagTrackPointer
+const interactive = flagClickable | flagFocusable | flagEditable | flagSelectable | flagDragWindow | flagDraggable | flagTrackPointer
 
 func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers) {
 	chain := rt.hitChain(x, y)
@@ -175,7 +175,7 @@ func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers) {
 		if target == nil && s.flags&interactive != 0 {
 			target = s
 		}
-		if focus == nil && s.flags&(flagFocusable|flagEditable) != 0 && s.flags&flagDisabled == 0 {
+		if focus == nil && s.flags&(flagFocusable|flagEditable|flagSelectable) != 0 && s.flags&flagDisabled == 0 {
 			focus = s
 		}
 	}
@@ -374,7 +374,7 @@ func (rt *engine) keyDown(mods Modifiers, key Key) {
 	if (key == KeyContextMenu && mods == 0 || key == KeyF10 && mods == Shift) && !rt.claimed(k) && rt.menuKey() {
 		return
 	}
-	if s := rt.states[rt.focused]; s != nil && s.editor != nil && s.flags&flagEditable != 0 && s.editor.wants(k) {
+	if s := rt.states[rt.focused]; s != nil && s.editor != nil && s.flags&(flagEditable|flagSelectable) != 0 && s.editor.wants(k) {
 		s.editor.queue = append(s.editor.queue, editEvent{kind: editKey, mods: mods, key: key})
 		rt.blinkStart = time.Now()
 		rt.requestFrame()
@@ -513,7 +513,11 @@ func (rt *engine) shortcut(id uint64, mods Modifiers, key Key) bool {
 
 func (rt *engine) editEvent(ev editEvent) {
 	s := rt.states[rt.focused]
-	if s == nil || s.editor == nil || s.flags&flagEditable == 0 {
+	if s == nil || s.editor == nil {
+		return
+	}
+	// Selectable text takes the menus' commands, as Copy, not text.
+	if s.flags&flagEditable == 0 && (s.flags&flagSelectable == 0 || ev.kind != editCommand) {
 		return
 	}
 	s.editor.queue = append(s.editor.queue, ev)

@@ -160,7 +160,9 @@ font by tag, or sets them with `tag=value`: `FontFeatures("tnum")` gives
 digits of one width for numbers that change, `FontFeatures("liga=0")`
 turns ligatures off. `SingleLine`
 keeps text on one line, cut with an ellipsis, and `MaxLines` limits it to a
-few.
+few. `Selectable` lets the user select a text with the pointer, Shift and
+the arrows, and copy it, as an error message or an identifier to paste
+elsewhere.
 
 Text is laid out and drawn by the system's own text engine (DirectWrite on
 Windows, Core Text on macOS, Pango on Linux) in the system's font (Segoe UI,

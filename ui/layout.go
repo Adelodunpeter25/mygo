@@ -271,6 +271,11 @@ func layoutBox(e *Element, w, h float32) {
 	switch e.kind {
 	case kindText:
 		e.tl = textSystem().Layout(e.textParams(max(cw, 1)))
+		if ed := e.st.editor; ed != nil && e.flags&flagSelectable != 0 {
+			// Selectable text hit-tests and selects in what it shows.
+			ed.layout = e.tl
+			ed.originX, ed.originY = e.pad[3]+e.borderW, e.pad[0]+e.borderW
+		}
 		return
 	case kindInput:
 		e.layoutInput(cw, ch)

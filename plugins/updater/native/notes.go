@@ -2,6 +2,7 @@ package native
 
 import (
 	"strconv"
+	"unicode"
 
 	"github.com/egoist/mygo/plugins/updater/internal/markdown"
 	"github.com/egoist/mygo/ui"
@@ -10,12 +11,60 @@ import (
 // notes builds release notes, in the manner of the page of package
 // updater. Their text is selectable, and links open in the browser.
 func notes(c *ui.Context, t *ui.Theme, blocks []markdown.Block) {
-	ui.Column(c).Children(func() { buildBlocks(c, t, blocks, false, 0) })
+	n := &notesStyle{t: t, rtl: rightToLeft(blocks)}
+	ui.Column(c).Children(func() { n.blocks(c, blocks, false, 0) })
 }
 
-// buildBlocks builds blocks, apart by the room between paragraphs, or by
-// none in the items of a list (tight). depth counts the lists around them.
-func buildBlocks(c *ui.Context, t *ui.Theme, blocks []markdown.Block, tight bool, depth int) {
+// notesStyle is how release notes look. Like the page's notes, whose dir
+// is auto, they are laid out from the right when the language they are
+// written in is written from right to left, whatever the window's.
+type notesStyle struct {
+	t   *ui.Theme
+	rtl bool
+}
+
+// rightToLeft reports whether the first strongly directional letter of
+// blocks is of a script written from right to left, as text does.
+func rightToLeft(blocks []markdown.Block) bool {
+	var rtl, found bool
+	var inlines func([]markdown.Inline)
+	text := func(s string) {
+		for _, r := range s {
+			if found {
+				return
+			}
+			switch {
+			case unicode.In(r, unicode.Hebrew, unicode.Arabic, unicode.Syriac, unicode.Thaana, unicode.Nko, unicode.Samaritan, unicode.Mandaic, unicode.Adlam):
+				rtl, found = true, true
+			case unicode.IsLetter(r):
+				found = true
+			}
+		}
+	}
+	inlines = func(ins []markdown.Inline) {
+		for _, in := range ins {
+			text(in.Text)
+			inlines(in.Children)
+		}
+	}
+	var walk func([]markdown.Block)
+	walk = func(bs []markdown.Block) {
+		for _, b := range bs {
+			inlines(b.Inlines)
+			text(b.Text)
+			for _, item := range b.Items {
+				walk(item)
+			}
+			walk(b.Blocks)
+		}
+	}
+	walk(blocks)
+	return rtl
+}
+
+// blocks builds blocks, apart by the room between paragraphs, or by none
+// in the items of a list (tight). depth counts the lists around them.
+func (n *notesStyle) blocks(c *ui.Context, blocks []markdown.Block, tight bool, depth int) {
 	for i, b := range blocks {
 		var gap float32
 		switch {
@@ -27,7 +76,7 @@ func buildBlocks(c *ui.Context, t *ui.Theme, blocks []markdown.Block, tight bool
 		default:
 			gap = 8
 		}
-		buildBlock(c, t, b, depth).Margin(gap, 0, 0, 0)
+		n.block(c, b, depth).Margin(gap, 0, 0, 0)
 	}
 }
 
@@ -35,7 +84,8 @@ func buildBlocks(c *ui.Context, t *ui.Theme, blocks []markdown.Block, tight bool
 // relative to the text.
 var headingSizes = [...]float32{16.0 / 13, 14.0 / 13, 1}
 
-func buildBlock(c *ui.Context, t *ui.Theme, b markdown.Block, depth int) *ui.Element {
+func (n *notesStyle) block(c *ui.Context, b markdown.Block, depth int) *ui.Element {
+	t := n.t
 	switch b.Kind {
 	case markdown.Heading:
 		size := headingSizes[min(b.Level, len(headingSizes))-1]
@@ -43,19 +93,34 @@ func buildBlock(c *ui.Context, t *ui.Theme, b markdown.Block, depth int) *ui.Ele
 	case markdown.List:
 		return ui.Column(c).Children(func() {
 			for i, item := range b.Items {
-				ui.Row(c).AlignItems(ui.Start).Children(func() {
+				row := ui.Row(c).AlignItems(ui.Start)
+				if n.rtl {
+					row.Reverse()
+				}
+				row.Children(func() {
 					marker := bullet(depth)
 					if b.Ordered {
 						marker = strconv.Itoa(i+1) + "."
 					}
-					ui.Text(c, marker).Width(20).Shrink(0).TextAlign(ui.End).Padding(0, 6, 0, 0)
-					ui.Column(c).Grow(1).Children(func() { buildBlocks(c, t, item, true, depth+1) })
+					// The marker ends next to the item.
+					m := ui.Text(c, marker).Width(20).Shrink(0)
+					if n.rtl {
+						m.Padding(0, 0, 0, 6)
+					} else {
+						m.TextAlign(ui.End).Padding(0, 6, 0, 0)
+					}
+					ui.Column(c).Grow(1).Children(func() { n.blocks(c, item, true, depth+1) })
 				})
 			}
 		})
 	case markdown.Quote:
-		return ui.Column(c).BorderWidth(0, 0, 0, 3).BorderColor(t.Border).Padding(0, 0, 0, 10).
-			TextColor(t.TextMuted).Children(func() { buildBlocks(c, t, b.Blocks, false, depth) })
+		quote := ui.Column(c).BorderColor(t.Border).TextColor(t.TextMuted)
+		if n.rtl {
+			quote.BorderWidth(0, 3, 0, 0).Padding(0, 10, 0, 0)
+		} else {
+			quote.BorderWidth(0, 0, 0, 3).Padding(0, 0, 0, 10)
+		}
+		return quote.Children(func() { n.blocks(c, b.Blocks, false, depth) })
 	case markdown.Code:
 		return ui.ScrollHorizontal(c).Background(track(t)).Radius(3).Children(func() {
 			ui.Text(c, b.Text).Font("monospace").FontSize(t.Rem(12.0/13)).NoWrap().Padding(6, 8).Selectable()

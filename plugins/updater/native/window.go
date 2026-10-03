@@ -82,12 +82,9 @@ func (w *window) view(c *ui.Context) {
 
 	var body, aside, buttons *ui.Element
 	ui.Column(c).Fill().Padding(padTop, padSide, padBottom).Gap(footGap).Children(func() {
-		top := ui.Row(c).Grow(1).Gap(iconGap).AlignItems(ui.Start)
+		top := w.row(c).Grow(1).Gap(iconGap).AlignItems(ui.Start)
 		if v.Release {
 			top.AlignItems(ui.Stretch)
-		}
-		if w.texts.RTL {
-			top.Reverse()
 		}
 		top.Children(func() {
 			if w.icon != nil {
@@ -95,49 +92,59 @@ func (w *window) view(c *ui.Context) {
 			}
 			body = ui.Column(c).Grow(1).Children(func() { w.body(c, t, v) })
 		})
-		foot := ui.Row(c).Gap(10).Shrink(0)
-		if w.texts.RTL {
-			foot.Reverse()
-		}
-		foot.Children(func() {
-			aside = ui.Row(c).Gap(10).Shrink(0).Children(func() { w.buttons(c, t, v, true) })
+		w.row(c).Gap(10).Shrink(0).Children(func() {
+			aside = w.row(c).Gap(10).Shrink(0).Children(func() { w.buttons(c, t, v, true) })
 			ui.Spacer(c)
-			buttons = ui.Row(c).Gap(10).Shrink(0).Children(func() { w.buttons(c, t, v, false) })
+			buttons = w.row(c).Gap(10).Shrink(0).Children(func() { w.buttons(c, t, v, false) })
 		})
 	})
 	w.fit(c, v, body, aside, buttons)
 }
 
-// body builds the texts, progress bar, release notes and checkbox of the
-// view.
-func (w *window) body(c *ui.Context, t *ui.Theme, v frontend.View) {
-	align := ui.Start
+// row creates a row, laid out from the right in a window of a language
+// written from right to left.
+func (w *window) row(c *ui.Context) *ui.Element {
+	r := ui.Row(c)
 	if w.texts.RTL {
-		align = ui.End
+		r.Reverse()
 	}
+	return r
+}
+
+// body builds the texts, progress bar, release notes and checkbox of the
+// view. Texts start on the side their own language starts, as the
+// page's unicode-bidi: plaintext does, since they may fall back to
+// English or be errors.
+func (w *window) body(c *ui.Context, t *ui.Theme, v frontend.View) {
 	small := t.Rem(11.0 / 13)
-	ui.Text(c, v.Title).Key("title").Bold().TextAlign(align).Margin(0, 0, 4, 0)
+	ui.Text(c, v.Title).Key("title").Bold().Margin(0, 0, 4, 0)
 	if v.Message != "" {
-		ui.Text(c, v.Message).Key("message").TextAlign(align).Margin(0, 0, 6, 0)
+		ui.Text(c, v.Message).Key("message").Margin(0, 0, 6, 0)
 	}
 	if v.Bar {
-		ui.Progress(c, v.Progress).Key("bar").Margin(6, 0, 4, 0)
+		bar := ui.Progress(c, v.Progress).Key("bar").Margin(6, 0, 4, 0)
+		if w.texts.RTL {
+			bar.Reverse()
+		}
 	}
 	if v.Detail != "" {
-		ui.Text(c, v.Detail).Key("detail").FontSize(small).TextColor(t.TextMuted).TextAlign(align).
+		ui.Text(c, v.Detail).Key("detail").FontSize(small).TextColor(t.TextMuted).
 			MaxLines(2).Tooltip(v.Detail).Selectable()
 	}
 	if len(v.Notes) > 0 {
 		ui.Column(c).Key("notes").Grow(1).Margin(6, 0, 0, 0).Children(func() {
-			ui.Text(c, w.texts.ReleaseNotes).FontSize(small).Bold().TextAlign(align).Margin(0, 0, 4, 0)
+			ui.Text(c, w.texts.ReleaseNotes).FontSize(small).Bold().Margin(0, 0, 4, 0)
 			ui.Scroll(c).Grow(1).Background(panel(t)).Border(1, t.Border).Padding(8, 12).Children(func() {
 				notes(c, t, v.Notes)
 			})
 		})
 	}
 	if v.Checkbox {
-		ui.Row(c).Key("checkbox").Margin(10, 0, 0, 0).Children(func() {
-			ui.Checkbox(c, &w.checked, w.texts.AutomaticDownloads)
+		w.row(c).Key("checkbox").Margin(10, 0, 0, 0).Children(func() {
+			box := ui.Checkbox(c, &w.checked, w.texts.AutomaticDownloads)
+			if w.texts.RTL {
+				box.Reverse()
+			}
 		})
 	}
 }

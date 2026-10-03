@@ -250,17 +250,49 @@ func TestLayout(t *testing.T) {
 	var icon bytes.Buffer
 	png.Encode(&icon, image.NewRGBA(image.Rect(0, 0, 128, 128)))
 	for _, rtl := range []bool{false, true} {
-		s := newSession(available(1, "Notes"))
+		s := newSession(available(1, "- An English item"))
 		s.icon, s.texts.RTL = icon.Bytes(), rtl
 		tt := ui.NewTester(newWindow(s).view, frontend.ReleaseWidth, frontend.ReleaseHeight)
-		title, _ := tt.Find("A new version of App is available!")
-		skip, _ := tt.Find("Skip This Version")
-		install, _ := tt.Find("Install Update")
-		if !rtl && (title.X < padSide+iconSize+iconGap || skip.X > install.X) {
-			t.Errorf("left to right: the title at %v, Skip at %v, Install at %v", title, skip, install)
+		find := func(text string) ui.Rect {
+			t.Helper()
+			r, ok := tt.Find(text)
+			if !ok {
+				t.Fatalf("no %q", text)
+			}
+			return r
 		}
-		if rtl && (title.X+title.W > frontend.ReleaseWidth-padSide-iconSize-iconGap+1 || skip.X < install.X) {
-			t.Errorf("right to left: the title at %v, Skip at %v, Install at %v", title, skip, install)
+		// The title, stretched across the column of texts, which the
+		// icon leaves.
+		body := find("A new version of App is available!")
+		skip, later, install := find("Skip This Version"), find("Remind Me Later"), find("Install Update")
+		// The checkbox's box sits between its label and the edge of the
+		// texts' column where they start.
+		label := find(s.texts.AutomaticDownloads)
+		left, right := label.X-body.X, body.X+body.W-(label.X+label.W)
+		bullet, item := find("•"), find("An English item")
+		if !rtl {
+			if body.X < padSide+iconSize+iconGap || skip.X > later.X || later.X > install.X {
+				t.Errorf("left to right: texts at %v, Skip at %v, Later at %v, Install at %v", body, skip, later, install)
+			}
+			if left < 4 || left > right {
+				t.Errorf("left to right: the checkbox's label at %v in %v", label, body)
+			}
+		} else {
+			if body.X+body.W > frontend.ReleaseWidth-padSide-iconSize-iconGap+1 || skip.X < later.X || later.X < install.X {
+				t.Errorf("right to left: texts at %v, Skip at %v, Later at %v, Install at %v", body, skip, later, install)
+			}
+			if right < 4 || right > left {
+				t.Errorf("right to left: the checkbox's label at %v in %v", label, body)
+			}
+		}
+		// Notes take the direction of their language, not the window's.
+		if bullet.X > item.X {
+			t.Errorf("rtl %v: the bullet of English notes at %v, the item at %v", rtl, bullet, item)
+		}
+		s.set(available(2, "- פריט בעברית"))
+		tt.Frame()
+		if bullet, item := find("•"), find("פריט בעברית"); bullet.X < item.X {
+			t.Errorf("rtl %v: the bullet of Hebrew notes at %v, the item at %v", rtl, bullet, item)
 		}
 	}
 }

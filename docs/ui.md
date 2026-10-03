@@ -354,7 +354,7 @@ look of your own, build on the widgets' bases, which have none: see
 | `Radio` | sets a `*T` to its value |
 | `Select` | picks one of a list of strings, from a popup |
 | `Slider` | sets a `*float64` within a range, by dragging or with the arrow keys |
-| `Progress` | a bar filled from 0 to 1, or sliding across for a negative value, for work of unknown length |
+| `Progress` | a bar filled from 0 to 1, or sliding across for a negative value, for work of unknown length; `Reverse` fills it from the right |
 | `TextInput`, `TextArea` | edit a `*string` on one line or several, with selection, undo, the clipboard and input methods; `Placeholder`, `Password`, `Submitted` (Enter) and `Changed` |
 | `NumberInput` | edits a `*float64` within a range, typed or stepped with Up, Down and its buttons |
 | `DateInput` | edits a `*time.Time` with a calendar, by click or with the arrow keys and Page Up and Down |

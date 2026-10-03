@@ -367,7 +367,7 @@ func PopoverBase(c *Context, anchor *Element, open *bool, fn func(panel *Element
 		panel = Box(c).Absolute().Left(b.X).Top(b.Y + b.H).Role(RolePopup)
 		panel.flags |= flagClickable
 		panel.Children(func() { fn(panel) })
-		keepInWindow(c, panel, b.X, b.Y+b.H, b.Y)
+		keepInWindow(panel, b.X, b.Y+b.H, b.Y)
 	})
 	return panel
 }

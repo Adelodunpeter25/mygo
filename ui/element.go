@@ -199,9 +199,12 @@ type Element struct {
 	// highlighted is set on the option of a select the pointer or the
 	// arrows are on.
 	highlighted bool
-	accValue    string
-	accRange    [3]float64
-	hasRange    bool
+	// place moves an overlay element to fit in the window, as keepInWindow
+	// asked.
+	place    placement
+	accValue string
+	accRange [3]float64
+	hasRange bool
 
 	// Layout results, in DIPs relative to the window.
 	x, y, w, h float32

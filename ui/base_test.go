@@ -292,3 +292,47 @@ func TestFocusRing(t *testing.T) {
 		t.Error("a ring around a button that turned it off")
 	}
 }
+
+// TestPopupsOpenWhereTheyFit opens popovers where there is no room below
+// or to the right of their anchors: the first frame that paints them has
+// them where they fit, instead of moving them once it knows their size.
+func TestPopupsOpenWhereTheyFit(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		justify Align
+		align   Align
+	}{{"bottom right", End, End}, {"top left", Start, Start}} {
+		open := false
+		var first *Rect
+		tt := NewTester(func(c *Context) {
+			Column(c).Fill().Padding(10).Justify(tc.justify).AlignItems(tc.align).Children(func() {
+				b := ButtonBase(c).Size(80, 24).Label("anchor")
+				if b.Clicked() {
+					open = true
+				}
+				PopoverBase(c, b, &open, func(panel *Element) {
+					panel.Size(160, 120).Margin(4, 0, 0, 0).Draw(func(p *Painter, r Rect) {
+						if first == nil {
+							first = &r
+						}
+					})
+				})
+			})
+		}, 300, 300)
+		tt.Click("anchor")
+		a, _ := tt.Find("anchor")
+		if first == nil {
+			t.Fatalf("%s: the popover was not painted", tc.name)
+		}
+		r := *first
+		if r.X < 4 || r.X+r.W > 296 {
+			t.Errorf("%s: the popover first shows at %v, out of the window", tc.name, r)
+		}
+		if tc.justify == End && r.Y+r.H != a.Y-4 {
+			t.Errorf("%s: the popover first shows at %v, not 4 DIPs above its anchor at %v", tc.name, r, a)
+		}
+		if tc.justify == Start && (r.Y != a.Y+a.H+4 || r.X != a.X) {
+			t.Errorf("%s: the popover first shows at %v, not 4 DIPs below its anchor at %v", tc.name, r, a)
+		}
+	}
+}

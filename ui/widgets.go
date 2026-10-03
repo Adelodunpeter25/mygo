@@ -433,7 +433,7 @@ func (e *Element) Tooltip(s string) *Element {
 			Background(t.Text).TextColor(t.Background).FontSize(t.FontSize - 1).PassThrough().Role(RoleTooltip)
 		tip.Shadow(0, 2, 8, 0, RGBA(0, 0, 0, 0.2))
 		tip.Children(func() { Text(c, s) })
-		keepInWindow(c, tip, x, y, y-30)
+		keepInWindow(tip, x, y, y-30)
 	})
 	return e
 }
@@ -513,23 +513,32 @@ func Select(c *Context, selected *string, options []string) *Element {
 	return b
 }
 
-// keepInWindow moves an overlay element placed at (x, y) so that it fits
-// in the window, by the size it had in the last frame: left when it would
-// overflow the right edge, above (ending at aboveY) when it would overflow
-// the bottom. Without a last frame it asks for another one to settle.
-func keepInWindow(c *Context, e *Element, x, y, aboveY float32) {
-	b := e.Bounds()
-	if b.W == 0 && b.H == 0 {
-		c.AnimationFrame()
-		return
+// keepInWindow places an overlay element at (x, y), where the layout,
+// which knows its size, moves it to fit in the window: left when it would
+// overflow the right edge, above, ending at aboveY, when it would
+// overflow the bottom. A top margin keeps it apart from what it is above
+// or below.
+func keepInWindow(e *Element, x, y, aboveY float32) {
+	e.Left(x).Top(y)
+	e.place = placement{on: true, above: aboveY}
+}
+
+// placement is where an overlay element goes when it does not fit below
+// what it belongs to: above, its bottom at above.
+type placement struct {
+	on    bool
+	above float32
+}
+
+// fit moves an absolute element w×h at (left, top) in a containing block
+// pw×ph, its placement says, to fit in the block.
+func (p placement) fit(e *Element, left, top, w, h, pw, ph float32) (float32, float32) {
+	if left+e.margin[3]+w > pw-4 {
+		left = max(4-e.margin[3], pw-4-w-e.margin[3])
 	}
-	if x+b.W > c.w-4 {
-		e.Left(max(4, c.w-4-b.W))
-	}
-	// A top margin keeps the element apart from what it is above or
-	// below.
 	m := e.margin[0]
-	if y+m+b.H > c.h-4 && aboveY-m-b.H > 4 {
-		e.Top(aboveY - b.H - 2*m)
+	if top+m+h > ph-4 && p.above-m-h > 4 {
+		top = p.above - h - 2*m
 	}
+	return left, top
 }

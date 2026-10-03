@@ -44,8 +44,9 @@ func main() {
 }
 ```
 
-The gallery example tours what the toolkit does: `go run ./examples/gallery`
-in a clone of the repository.
+`mygo init -template native my-app` starts a project of native UI (see
+[the CLI](cli.md#mygo-init)). The gallery example tours what the toolkit
+does: `go run ./examples/gallery` in a clone of the repository.
 
 One app can have windows of both kinds. Native UI suits tools, settings,
 inspectors and utilities, and apps that must start instantly; a web page

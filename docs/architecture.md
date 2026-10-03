@@ -1039,6 +1039,12 @@ renderer's (`gputest.Compare`).
   do not meet); `vite.config.ts` pins the dev server to the port of `devUrl`
   and does not watch the development app and builds. Names reach the
   templates escaped for their language (`json`, `printf "%q"`, `html`).
+  `-template native` renders `cmd/mygo/template/native` instead (the
+  frontend's is `template/web`): an app of native UI with a test of its
+  view and a `mygo.json`, whose module has the CLI as a tool (`go get
+  -tool`, or a `tool` line beside the `replace` of a checkout), for
+  `go tool mygo dev` and `build`; no Bun. Without a frontend in the
+  configuration, `bindings` stays empty and the CLI writes no client.
 - The configuration is `mygo.config.ts`, or `mygo.json` (`config.go`,
   `config_ts.go`). For the former, Bun, else Node.js 22.6 or later (with
   `--experimental-strip-types` before 22.18 and 23.6), runs a loader that

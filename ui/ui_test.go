@@ -379,3 +379,33 @@ func TestKeyboardScrolling(t *testing.T) {
 		t.Errorf("Down moved the slider to %v and the list to %v", d.volume, y)
 	}
 }
+
+// TestElementsGoneInARebuild forgets the elements a frame built, then left
+// out when it built again: a field that comes back is new, and takes the
+// focus with AutoFocus again.
+func TestElementsGoneInARebuild(t *testing.T) {
+	text, open := "", true
+	tt := NewTester(func(c *Context) {
+		Column(c).Gap(8).Children(func() {
+			opener := Button(c, "Open")
+			if opener.Clicked() {
+				open = true
+			}
+			if open {
+				TextInput(c, &text).AutoFocus().Label("Field")
+				if Button(c, "Close").Clicked() {
+					open = false
+					opener.Focus()
+				}
+			}
+		})
+	}, 300, 200)
+	if !tt.Focused("Field") {
+		t.Fatal("the field does not take the focus at first")
+	}
+	tt.Click("Close")
+	tt.Key(0, KeyEnter) // on Open
+	if !open || !tt.Focused("Field") {
+		t.Errorf("the field that came back does not take the focus (open %v)", open)
+	}
+}

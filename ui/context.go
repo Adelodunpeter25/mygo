@@ -216,6 +216,7 @@ func Local[T any](e *Element, key any, init func() T) *T {
 type state struct {
 	id   uint64
 	seen uint64
+	pass int // the pass of the frame that built it last
 	born uint64 // the frame that first built the element
 	// The element's box and its visible part in the last frame.
 	x, y, w, h     float32
@@ -255,7 +256,7 @@ func (rt *engine) stateFor(id uint64) *state {
 		s = &state{id: id, born: rt.frame}
 		rt.states[id] = s
 	}
-	s.seen = rt.frame
+	s.seen, s.pass = rt.frame, rt.pass
 	return s
 }
 

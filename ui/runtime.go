@@ -46,6 +46,9 @@ type engine struct {
 
 	states map[uint64]*state
 	frame  uint64
+	// pass is the pass of the view building the frame: the last one
+	// builds the elements that stay.
+	pass int
 
 	// What the last frame laid out, for input until the next one.
 	hits       []hit
@@ -170,6 +173,7 @@ func (rt *engine) runFrame() {
 	// An event handled while building (a click, an edit) may change what
 	// was built before it: build again, so the frame shows the outcome.
 	for pass := 0; pass < 3; pass++ {
+		rt.pass = pass
 		rt.consumed = false
 		rt.nextRegs = rt.nextRegs[:0]
 		rt.c.reset(now, w, h)
@@ -213,7 +217,7 @@ func (rt *engine) runFrame() {
 // endPass forgets the input the pass handled.
 func (rt *engine) endPass() {
 	for _, s := range rt.states {
-		if s.seen != rt.frame {
+		if s.seen != rt.frame || s.pass != rt.pass {
 			continue
 		}
 		s.clicks, s.rightClicks, s.doubleClicks = 0, 0, 0
@@ -228,7 +232,7 @@ func (rt *engine) endPass() {
 // prune forgets the elements the frame did not build.
 func (rt *engine) prune() {
 	for id, s := range rt.states {
-		if s.seen != rt.frame {
+		if s.seen != rt.frame || s.pass != rt.pass {
 			if rt.pressed == s {
 				rt.pressed = nil
 			}

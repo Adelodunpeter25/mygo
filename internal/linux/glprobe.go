@@ -4,6 +4,7 @@ package linux
 
 import (
 	"log"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -42,6 +43,12 @@ type gdkWindowAttr struct {
 // gpuGL reports whether GDK's OpenGL contexts draw on a GPU.
 func gpuGL() bool {
 	glProbe.once.Do(func() {
+		// MYGO_GPU=1 draws with OpenGL wherever GDK makes a context, on
+		// the CPU too: tests of the GL surface run so without a GPU.
+		if os.Getenv("MYGO_GPU") == "1" {
+			glProbe.gpu = true
+			return
+		}
 		// Without a GPU device, GL draws on the CPU: the probe, whose
 		// driver stays loaded, would cost memory to say so.
 		if !gpuDevice() {

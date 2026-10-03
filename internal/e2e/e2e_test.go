@@ -1992,6 +1992,25 @@ func TestContentWindow(t *testing.T) {
 	if c := at(300, 250); c.B < 200 || c.R > 60 {
 		t.Errorf("the background is %v", c)
 	}
+	// With MYGO_GPU=1 Linux draws with OpenGL without a GPU too: the
+	// capture is drawn on the CPU, the GtkGLArea shows what OpenGL drew.
+	if os.Getenv("MYGO_GPU") == "1" {
+		if how, pix, gw, _, ok := glSurface(w); ok {
+			if how != "opengl" || len(pix) == 0 {
+				t.Fatalf("the surface draws %q, not with OpenGL", how)
+			}
+			bgra := func(x, y float64) []byte {
+				s := float64(gw) / 400
+				return pix[(int(y*s)*gw+int(x*s))*4:][:4]
+			}
+			if c := bgra(100, 50); c[2] < 200 || c[0] > 60 {
+				t.Errorf("the red box is %v (BGRA) in the GtkGLArea", c)
+			}
+			if c := bgra(300, 250); c[0] < 200 || c[2] > 60 {
+				t.Errorf("the background is %v (BGRA) in the GtkGLArea", c)
+			}
+		}
+	}
 
 	before := frames.Load()
 	w.Update(func() { label.Store("after") })

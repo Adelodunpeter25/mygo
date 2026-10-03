@@ -482,4 +482,5 @@ pixels on the CPU: a few milliseconds for a whole large window on a
 high-density display, and less than a tenth of one for what typically
 changes, such as a button under the pointer, since it redraws only that.
 Set `MYGO_GPU=0` to use the CPU renderer everywhere, for instance to
-compare.
+compare, and on Linux `MYGO_GPU=1` to draw with OpenGL even where it runs
+on the CPU.

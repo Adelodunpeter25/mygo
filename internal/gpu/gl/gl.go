@@ -66,6 +66,9 @@ const (
 	glFramebufferDone    = 0x8CD5
 	glFramebufferBinding = 0x8CA6
 	glPackAlignment      = 0x0D05
+	glReadFramebuffer    = 0x8CA8
+	glDrawFramebuffer    = 0x8CA9
+	glNearest            = 0x2600
 	glNoError            = 0
 )
 
@@ -129,6 +132,7 @@ var (
 	glFramebufferTexture2D  func(target, attachment, texTarget, texture uint32, level int32)
 	glCheckFramebufferState func(target uint32) uint32
 	glDeleteFramebuffers    func(n int32, fbs *uint32)
+	glBlitFramebuffer       func(sx0, sy0, sx1, sy1, dx0, dy0, dx1, dy1 int32, mask, filter uint32)
 )
 
 func load() error {
@@ -210,6 +214,7 @@ func load() error {
 		gl(&glFramebufferTexture2D, "glFramebufferTexture2D")
 		gl(&glCheckFramebufferState, "glCheckFramebufferStatus")
 		gl(&glDeleteFramebuffers, "glDeleteFramebuffers")
+		gl(&glBlitFramebuffer, "glBlitFramebuffer")
 		if len(missing) > 0 {
 			errLoad = fmt.Errorf("gl: libepoxy lacks %s", strings.Join(missing, ", "))
 			return

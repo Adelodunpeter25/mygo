@@ -192,3 +192,11 @@ func accessPerform(w *mygo.Window, label, action, value string) (ok bool) {
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
 func compose(*mygo.Window, string, int, bool) bool             { return false }
+
+// glSurface returns how the native UI of a window draws ("opengl",
+// "memory", "cairo") and, for a GtkGLArea, the pixels of its framebuffer,
+// premultiplied BGRA rows from the top.
+func glSurface(w *mygo.Window) (how string, pix []byte, width, height int, supported bool) {
+	mygo.RunOnMain(func() { how, pix, width, height = linux.TestSurfaceGL(w.NativeHandle()) })
+	return how, pix, width, height, true
+}

@@ -146,3 +146,6 @@ func accessPerform(w *mygo.Window, label, action, value string) (ok bool) {
 	mygo.RunOnMain(func() { ok = darwin.TestAccessibilityPerform(w.NativeHandle(), label, action, value) })
 	return ok
 }
+
+// Only Linux draws native UI in a GtkGLArea.
+func glSurface(*mygo.Window) (string, []byte, int, int, bool) { return "", nil, 0, 0, false }

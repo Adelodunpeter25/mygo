@@ -984,8 +984,11 @@ either.
   redraws every pixel of every frame on the CPU, ten times the CPU
   renderer's work on an animated page; and once a window has a GL context
   GTK composites it with OpenGL, so the choice is made before any surface
-  has one. A surface whose GL renderer fails all the same gives way to a
-  GtkDrawingArea.
+  has one; `MYGO_GPU=1` skips it and draws with OpenGL wherever GDK makes a
+  context, as the GUI tests of CI do on llvmpipe. A GtkGLArea shows only
+  what OpenGL draws into it: when its GL renderer fails all the same, the
+  frames drawn in memory go through OpenGL too (`gl.Presenter` uploads
+  them and blits them into the area's framebuffer).
 
   `internal/raster` draws the same scene with the same formulas on the CPU,
   solid spans inside shapes and only the edges of shadows computed, and
@@ -1203,7 +1206,7 @@ profile).
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
 | plugins | `go test ./plugins/...` | the fetch plugin against `httptest` servers, the WebSocket client against a test server (ordering, fragments, pings, closing handshakes) |
 | native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS, OpenGL on Linux); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; `go test -run '^$' -bench . ./ui` times a frame |
-| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open, native UI (frames, clicks, input methods replacing typed text, file drops, assistive technology reading and acting; on macOS typing, skipped while an input method is selected, and composing); on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
+| GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open, native UI (frames, clicks, input methods replacing typed text, file drops, assistive technology reading and acting; on macOS typing, skipped while an input method is selected, and composing; on Linux with `MYGO_GPU=1`, what OpenGL drew in the GtkGLArea); on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
 
 The XDG variables let the URL scheme test check that GLib opens the scheme
 with the handler it registered; without them it writes to temporary

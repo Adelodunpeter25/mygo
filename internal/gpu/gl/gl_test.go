@@ -3,6 +3,7 @@
 package gl
 
 import (
+	"bytes"
 	"runtime"
 	"testing"
 	"unsafe"
@@ -10,6 +11,7 @@ import (
 	"github.com/ebitengine/purego"
 
 	"github.com/egoist/mygo/internal/gpu/gputest"
+	"github.com/egoist/mygo/internal/raster"
 )
 
 // EGL enumerations.
@@ -103,18 +105,11 @@ func offscreen(t *testing.T, w, h int) (read func() []byte) {
 		glDeleteTextures(1, &tex)
 	})
 	return func() []byte {
-		pix := make([]byte, w*h*4)
-		glPixelStorei(glPackAlignment, 1)
-		glReadPixels(0, 0, int32(w), int32(h), glRGBA, glUnsignedByte, unsafe.Pointer(&pix[0]))
-		// GL's rows go up.
-		out := make([]byte, len(pix))
-		for y := range h {
-			src, dst := pix[(h-1-y)*w*4:][:w*4], out[y*w*4:][:w*4]
-			for x := 0; x < w*4; x += 4 {
-				dst[x], dst[x+1], dst[x+2], dst[x+3] = src[x+2], src[x+1], src[x], src[x+3]
-			}
+		pix, err := ReadFramebuffer(w, h)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return out
+		return pix
 	}
 }
 
@@ -133,5 +128,22 @@ func TestDrawsAsTheCPURenderer(t *testing.T) {
 			t.Fatal(err)
 		}
 		gputest.Compare(t, "gl", read(), s.Width*4, s)
+	}
+}
+
+func TestPresentsFramesDrawnInMemory(t *testing.T) {
+	s := gputest.Scene()
+	read := offscreen(t, s.Width, s.Height)
+	want := raster.NewImage(s.Width, s.Height)
+	raster.Render(want, s)
+	var p Presenter
+	// Twice: the second frame reuses the texture.
+	for range 2 {
+		if err := p.Present(want.Pix, want.Stride, want.W, want.H); err != nil {
+			t.Fatal(err)
+		}
+		if got := read(); !bytes.Equal(got, want.Pix[:len(got)]) {
+			t.Fatal("the frame presented differs from the frame drawn")
+		}
 	}
 }

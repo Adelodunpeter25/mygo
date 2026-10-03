@@ -3,12 +3,14 @@
 package linux
 
 import (
+	"log"
 	"os"
 	"sync"
 	"unicode/utf8"
 
 	"github.com/ebitengine/purego"
 
+	"github.com/egoist/mygo/internal/gpu/gl"
 	"github.com/egoist/mygo/internal/platform"
 )
 
@@ -51,12 +53,11 @@ var (
 	gtkGLAreaGetError           func(a ptr) ptr
 	gdkWindowPeekChildren       func(w ptr) ptr
 	gdkWindowGetUserData        func(w ptr, data *ptr)
-	gtkWidgetGetParent          func(w ptr) ptr
 
 	cbSurfaceDraw, cbSurfaceSize, cbSurfaceRealize, cbSurfaceButton ptr
 	cbSurfaceMotion, cbSurfaceLeave, cbSurfaceScroll, cbSurfaceKey  ptr
 	cbSurfaceFocusIn, cbSurfaceFocusOut, cbSurfaceScale, cbIMCommit ptr
-	cbIMPreedit, cbIMPreeditEnd, cbSurfaceRender, cbSurfaceSwap     ptr
+	cbIMPreedit, cbIMPreeditEnd, cbSurfaceRender                    ptr
 	surfaceCursors                                                  = map[platform.Cursor]ptr{}
 )
 
@@ -88,7 +89,6 @@ func loadSurface() {
 		mustBind(c, &cairoPaint, "cairo_paint")
 		mustBind(d, &gdkWindowPeekChildren, "gdk_window_peek_children")
 		mustBind(d, &gdkWindowGetUserData, "gdk_window_get_user_data")
-		mustBind(t, &gtkWidgetGetParent, "gtk_widget_get_parent")
 		// GtkGLArea came in GTK 3.16.
 		if !bind(t, &gtkGLAreaNew, "gtk_gl_area_new") || !bind(t, &gtkGLAreaSetRequiredVersion, "gtk_gl_area_set_required_version") ||
 			!bind(t, &gtkGLAreaSetHasAlpha, "gtk_gl_area_set_has_alpha") || !bind(t, &gtkGLAreaGetError, "gtk_gl_area_get_error") {
@@ -103,10 +103,14 @@ type surface struct {
 	im     ptr // GtkIMContext
 	cr     ptr // the cairo context of the draw signal in progress
 	cursor platform.Cursor
-	// gl tells that the area is a GtkGLArea, cpu that its frames are drawn
-	// in memory all the same, rendering that its render signal is in
-	// progress.
-	gl, cpu, rendering bool
+	// gl tells that the area is a GtkGLArea, rendering that its render
+	// signal is in progress, rendered that it ran.
+	gl, rendering, rendered bool
+	// present shows the frames the content draws in memory in a GtkGLArea,
+	// as when its GL renderer fails; inMemory tells that it did, failed
+	// that it failed too.
+	present                 gl.Presenter
+	inMemory, presentFailed bool
 
 	textInput bool
 	caret     platform.RectF
@@ -139,7 +143,7 @@ func (s *surface) newArea(gl bool) {
 		gtkGLAreaSetHasAlpha(s.area, true)
 		connect(s.area, "render", cbSurfaceRender, data)
 	}
-	s.gl, s.cpu = gl, false
+	s.gl = gl
 	gtkWidgetSetCanFocus(s.area, true)
 	gtkWidgetAddEvents(s.area, surfaceEvents)
 	// The edges of a frameless window resize it, as over a page.
@@ -160,41 +164,6 @@ func (s *surface) newArea(gl bool) {
 	connect(s.area, "key-release-event", cbSurfaceKey, data)
 	connect(s.area, "focus-in-event", cbSurfaceFocusIn, data)
 	connect(s.area, "focus-out-event", cbSurfaceFocusOut, data)
-}
-
-// drawInMemory makes a surface drawn with OpenGL draw in memory, when its
-// GL renderer fails or the area has no context: a GtkGLArea shows what
-// OpenGL drew, so a GtkDrawingArea takes its place, after the signal in
-// progress.
-func (s *surface) drawInMemory() {
-	if s.gl && !s.cpu {
-		s.cpu = true
-		gIdleAddFull(0, cbSurfaceSwap, ptr(s.w.id), 0)
-	}
-}
-
-func (s *surface) useDrawingArea() {
-	if !s.gl || s.w.closed {
-		return
-	}
-	old := s.area
-	parent := gtkWidgetGetParent(old)
-	focused := gtkWidgetHasFocus(old)
-	gtkIMContextSetClientWindow(s.im, 0)
-	// Removed, the GL area is destroyed, and forgotten with what assistive
-	// technology knew of it.
-	gtkContainerRemove(parent, old)
-	s.newArea(false)
-	s.connectArea(ptr(s.w.id))
-	if parent == s.w.box {
-		gtkBoxPackStart(parent, s.area, true, true, 0)
-	} else {
-		gtkContainerAdd(parent, s.area)
-	}
-	gtkWidgetShow(s.area)
-	if focused {
-		gtkWidgetGrabFocus(s.area)
-	}
 }
 
 // contentWidget returns the widget showing the window's content: the web
@@ -271,8 +240,13 @@ func (s *surface) RequestFrame() {
 func (s *surface) PresentPixels(pix []byte, stride, width, height int) {
 	if s.cr == 0 {
 		if s.rendering {
-			// The content draws in memory after all, as when OpenGL fails.
-			s.drawInMemory()
+			// The content draws in memory after all, as when its GL
+			// renderer fails: GTK shows only what OpenGL draws.
+			s.inMemory = true
+			if err := s.present.Present(pix, stride, width, height); err != nil && !s.presentFailed {
+				s.presentFailed = true
+				log.Printf("mygo: native UI shows nothing: %v", err)
+			}
 			return
 		}
 		// Frames are drawn in the draw signal; outside of it, ask for one.
@@ -392,14 +366,10 @@ func initSurfaceCallbacks() {
 		if s == nil {
 			return true
 		}
-		if s.gl {
-			if !s.cpu && gtkGLAreaGetError(s.area) == 0 {
-				return false // the area's render signal draws the frame
-			}
-			// Without OpenGL, the drawing area that takes the GL area's
-			// place draws.
-			s.drawInMemory()
-			return true
+		// A GtkGLArea draws in its render signal, unless it has no context:
+		// then, as a drawing area, in this one.
+		if s.gl && gtkGLAreaGetError(s.area) == 0 {
+			return false
 		}
 		s.cr = cr
 		s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
@@ -411,16 +381,10 @@ func initSurfaceCallbacks() {
 		if s == nil {
 			return false
 		}
-		s.rendering = true
+		s.rendering, s.rendered = true, true
 		s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
 		s.rendering = false
 		return true
-	})
-	cbSurfaceSwap = purego.NewCallback(func(data ptr) int32 {
-		if s := b().surfaceOf(data); s != nil {
-			s.useDrawingArea()
-		}
-		return 0 // G_SOURCE_REMOVE
 	})
 	cbSurfaceSize = purego.NewCallback(func(widget, allocation, data ptr) {
 		if s := b().surfaceOf(data); s != nil {

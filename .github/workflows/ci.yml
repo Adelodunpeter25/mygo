@@ -40,7 +40,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 xvfb xauth dbus-x11
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-0 xvfb xauth dbus-x11 libgl1-mesa-dri libglx-mesa0 libegl-mesa0
       - run: bun install --frozen-lockfile
       - name: Build the JavaScript packages
         run: bun run build
@@ -82,3 +82,11 @@ jobs:
           XDG_DATA_HOME: ${{ runner.temp }}/xdg-data
           XDG_CONFIG_HOME: ${{ runner.temp }}/xdg-config
         run: xvfb-run -a dbus-run-session -- go test ./internal/e2e
+      # Runners have no GPU, so native UI draws on the CPU above; MYGO_GPU=1
+      # draws it with OpenGL all the same, on Mesa's llvmpipe.
+      - name: GUI tests of native UI drawn with OpenGL
+        if: runner.os == 'Linux'
+        env:
+          MYGO_E2E: 1
+          MYGO_GPU: 1
+        run: xvfb-run -a dbus-run-session -- go test -run 'TestContentWindow' ./internal/e2e

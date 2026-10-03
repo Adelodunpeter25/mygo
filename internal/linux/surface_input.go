@@ -30,16 +30,10 @@ var (
 // and drop, and assistive technology.
 func (s *surface) connectSystem(data ptr) {
 	systemOnce.Do(initSystemSurface)
-	s.connectArea(data)
-	connect(s.im, "retrieve-surrounding", cbIMRetrieveSurrounding, data)
-	connect(s.im, "delete-surrounding", cbIMDeleteSurrounding, data)
-}
-
-// connectArea connects the surface's widget to drag and drop and
-// assistive technology.
-func (s *surface) connectArea(data ptr) {
 	surfaceAreas[s.area] = s
 	connect(s.area, "destroy", cbSurfaceAreaDestroy, data)
+	connect(s.im, "retrieve-surrounding", cbIMRetrieveSurrounding, data)
+	connect(s.im, "delete-surrounding", cbIMDeleteSurrounding, data)
 	s.acceptFileDrops(data)
 }
 

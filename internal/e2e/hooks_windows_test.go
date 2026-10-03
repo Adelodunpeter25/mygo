@@ -167,3 +167,6 @@ func accessPerform(w *mygo.Window, label, action, value string) (ok bool) {
 // Typing into native UI is only automated on macOS.
 func clickAndType(*mygo.Window, float64, float64, string) bool { return false }
 func compose(*mygo.Window, string, int, bool) bool             { return false }
+
+// Only Linux draws native UI in a GtkGLArea.
+func glSurface(*mygo.Window) (string, []byte, int, int, bool) { return "", nil, 0, 0, false }

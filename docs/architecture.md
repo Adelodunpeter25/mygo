@@ -1014,7 +1014,15 @@ either.
     while a window animates. Two seconds after the last frame, as the
     driver frees its own memory of frames, a timer shrinks the drawables,
     which frees all but the one shown, until the next frame makes them
-    again: an idle window keeps one frame of memory;
+    again: an idle window keeps one frame of memory. It also presents
+    frames drawn on the CPU without the GPU (`PresentPixels`): it locks
+    the next drawable's IOSurface and copies what changed since the frame
+    drawn in memory that drawable holds (it keeps the damage of the last
+    four, and whether the GPU drew into a drawable since), all of it after
+    the GPU did, and presents it, with no command buffer: the driver
+    allocates its 32 to 44 MB only for frames that run on the GPU, and the
+    CPU draws a small change in a fraction of the time the GPU takes to
+    start. Its drawables are not `framebufferOnly` for that;
   - `internal/gpu/gl` with the shader in GLSL 3.30 or GLSL ES 3.00, which
     the driver compiles when the renderer starts, since these versions
     have no compiled form every driver takes, and drivers keep what they
@@ -1050,6 +1058,19 @@ either.
   the one a window falls back to when its GPU renderer fails. Frames that
   are not the surface's (a capture before the first frame) are kept, not
   drawn: OpenGL's context is current only in the surface's.
+
+  Where the GPU renderer presents frames drawn in memory (Metal's), the
+  window host draws on the CPU the frames that change little, measuring
+  first what `raster.Renderer` would redraw (`Changes`): a frame after a
+  pause of 50 ms or more, unless it redraws more than 8 million pixels,
+  and in a burst of frames one that redraws at most a sixteenth of the
+  window: clocks, typing, the pointer over a button, a progress bar.
+  Scrolling, resizing and animations of much of the window draw on the
+  GPU, and the next frame after a pause catches up on the CPU. Once the
+  GPU has drawn alone for a second, the host frees the CPU's frame. The
+  gallery, which updates once a second, takes 0.2 to 0.4% of a core and
+  67 to 77 MB on macOS this way, against 0.4 to 0.5% and 110 to 116 MB on
+  the GPU alone.
 
   A GPU renderer that fails (a driver reset, a GPU unplugged, sleep) is
   released and another made in the same frame (`ui/window.go`): the GPU

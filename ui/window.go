@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"image"
 	"log"
 	"os"
 	"time"
@@ -74,6 +75,9 @@ type windowHost struct {
 	backoff  time.Duration
 	soft     raster.Renderer
 	last     *scene.Scene
+	// lastFrame is when the last frame was presented, and gpuSinceCPU
+	// when the first since the CPU drew one, if the GPU drew it.
+	lastFrame, gpuSinceCPU time.Time
 	// framing tells that the surface asked for the frame being drawn.
 	framing bool
 }
@@ -96,6 +100,24 @@ type gpuRenderer interface {
 	Render(s *scene.Scene) error
 	Release()
 }
+
+// pixelPresenter is a GPU renderer that also shows frames drawn in memory,
+// without the GPU, copying where they changed (Metal's).
+type pixelPresenter interface {
+	PresentPixels(pix []byte, stride, width, height int, scale float64, damage []image.Rectangle) error
+}
+
+// Frames that change little draw on the CPU, which the renderer copies
+// into its drawables: a clock ticking, typing, the pointer over a button.
+// The CPU draws them in less time than the GPU takes to start, and spares
+// the memory Metal's driver holds for a couple of seconds after each frame
+// it draws. Frames changing more than a sixteenth of the window while
+// frames follow each other, as when scrolling or animating most of it,
+// draw on the GPU, as do frames redrawing more than cpuMaxPixels.
+const (
+	burstGap     = 50 * time.Millisecond // frames closer follow each other
+	cpuMaxPixels = 8 << 20
+)
 
 func (h *windowHost) size() (float32, float32, float32) {
 	w, ht, s := h.conn.Surface.Size()
@@ -126,12 +148,54 @@ func (h *windowHost) present(s *scene.Scene) {
 		h.gpu = nil
 		h.makeGPU()
 	}
+	now := time.Now()
+	burst := now.Sub(h.lastFrame) < burstGap
+	h.lastFrame = now
+	if h.drawOnCPU(s, burst) {
+		h.gpuSinceCPU = time.Time{}
+		return
+	}
 	if h.render(s) {
+		h.dropCPUFrame(now)
 		return
 	}
 	h.soft.Render(s)
 	m := &h.soft.Image
 	h.conn.Surface.PresentPixels(m.Pix, m.Stride, m.W, m.H)
+}
+
+// drawOnCPU draws s on the CPU and has the GPU renderer present it, when
+// it changes little (see pixelPresenter), and reports whether it did.
+func (h *windowHost) drawOnCPU(s *scene.Scene, burst bool) bool {
+	p, ok := h.gpu.(pixelPresenter)
+	if !ok {
+		return false
+	}
+	changed := h.soft.Changes(s)
+	if changed > cpuMaxPixels || burst && changed > s.Width*s.Height/16 {
+		return false
+	}
+	damage := h.soft.Render(s)
+	m := &h.soft.Image
+	if err := p.PresentPixels(m.Pix, m.Stride, m.W, m.H, float64(s.Scale), damage); err != nil {
+		log.Printf("mygo: presenting a frame drawn in memory: %v", err)
+		return false
+	}
+	return true
+}
+
+// dropCPUFrame frees the frame the CPU drew last once the GPU has drawn
+// alone for a second, as while it animates much of the window: the CPU
+// would draw the next frame whole anyway.
+func (h *windowHost) dropCPUFrame(now time.Time) {
+	if _, ok := h.gpu.(pixelPresenter); !ok {
+		return
+	}
+	if h.gpuSinceCPU.IsZero() {
+		h.gpuSinceCPU = now
+	} else if now.Sub(h.gpuSinceCPU) > time.Second && h.soft.Image.Pix != nil {
+		h.soft = raster.Renderer{}
+	}
 }
 
 // render draws s with the GPU renderer and reports whether it did. One

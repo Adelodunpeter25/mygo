@@ -62,9 +62,7 @@ func (m *atlasMark) set(a *scene.Atlas) {
 // Render draws s, and returns the rectangles of Image it changed. s may
 // change once Render returns.
 func (r *Renderer) Render(s *scene.Scene) []image.Rectangle {
-	r.next = r.opBounds(s, r.next[:0])
-	full := !r.valid || s.Width != r.Image.W || s.Height != r.Image.H || s.Clear != r.clear || !r.diff(s)
-	if full {
+	if r.whole(s) {
 		r.Image.Resize(s.Width, s.Height)
 		r.damage = append(r.damage[:0], image.Rect(0, 0, s.Width, s.Height))
 	}
@@ -73,6 +71,25 @@ func (r *Renderer) Render(s *scene.Scene) []image.Rectangle {
 	}
 	r.remember(s)
 	return r.damage
+}
+
+// Changes returns how many pixels Render would draw for s.
+func (r *Renderer) Changes(s *scene.Scene) int {
+	if r.whole(s) {
+		return s.Width * s.Height
+	}
+	area := 0
+	for _, d := range r.damage {
+		area += d.Dx() * d.Dy()
+	}
+	return area
+}
+
+// whole sets the damage of s against the last scene, and reports whether
+// s must be drawn whole.
+func (r *Renderer) whole(s *scene.Scene) bool {
+	r.next = r.opBounds(s, r.next[:0])
+	return !r.valid || s.Width != r.Image.W || s.Height != r.Image.H || s.Clear != r.clear || !r.diff(s)
 }
 
 // Invalidate makes the next Render draw everything.

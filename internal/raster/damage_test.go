@@ -184,3 +184,32 @@ func TestRendererSkipsUnchangedScenes(t *testing.T) {
 		t.Errorf("one changed operation redrew %v", damage)
 	}
 }
+
+// TestChanges checks that Changes tells how much Render then draws.
+func TestChanges(t *testing.T) {
+	fill := func(x float32) *scene.Scene {
+		return &scene.Scene{Width: 200, Height: 100, Clear: scene.Color{R: 255, G: 255, B: 255, A: 255}, Ops: []scene.Op{
+			{Kind: scene.OpFill, Rect: scene.Rect{X: 10, Y: 10, W: 50, H: 50}, Color: scene.Color{R: 255, A: 255}},
+			{Kind: scene.OpFill, Rect: scene.Rect{X: x, Y: 70, W: 10, H: 10}, Color: scene.Color{B: 255, A: 255}},
+		}}
+	}
+	var r Renderer
+	if n := r.Changes(fill(100)); n != 200*100 {
+		t.Errorf("before a first scene: %d pixels", n)
+	}
+	r.Render(fill(100))
+	if n := r.Changes(fill(100)); n != 0 {
+		t.Errorf("the same scene: %d pixels", n)
+	}
+	n := r.Changes(fill(120))
+	if n == 0 || n > 2*12*12 {
+		t.Errorf("a small square moved: %d pixels", n)
+	}
+	area := 0
+	for _, d := range r.Render(fill(120)) {
+		area += d.Dx() * d.Dy()
+	}
+	if area != n {
+		t.Errorf("Render drew %d pixels, Changes said %d", area, n)
+	}
+}

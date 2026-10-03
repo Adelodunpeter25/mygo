@@ -11,9 +11,7 @@ package metal
 //go:generate go run gen.go
 
 import (
-	"crypto/sha256"
 	_ "embed"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -427,8 +425,7 @@ func (r *Renderer) init() error {
 // time, or 0 when it was compiled from another shader.metal (go generate
 // was not run since it changed) or Metal cannot load it.
 func (r *Renderer) compiledLibrary() id {
-	sum := sha256.Sum256([]byte(shaderSource))
-	if hex.EncodeToString(sum[:]) != shaderLibrarySum || dispatchDataCreate == 0 || !respondsTo(r.device, "newLibraryWithData:error:") {
+	if gpu.SourceSum(shaderSource) != shaderLibrarySum || dispatchDataCreate == 0 || !respondsTo(r.device, "newLibraryWithData:error:") {
 		return 0
 	}
 	// Without a destructor, dispatch_data_create copies the bytes.

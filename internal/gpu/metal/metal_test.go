@@ -3,10 +3,9 @@
 package metal
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"testing"
 
+	"github.com/egoist/mygo/internal/gpu"
 	"github.com/egoist/mygo/internal/gpu/gputest"
 )
 
@@ -30,7 +29,7 @@ func TestDrawsAsTheCPURenderer(t *testing.T) {
 // TestShaderLibrary checks that the library compiled ahead of time comes
 // from shader.metal as it is, and that Metal loads it.
 func TestShaderLibrary(t *testing.T) {
-	if sum := sha256.Sum256([]byte(shaderSource)); hex.EncodeToString(sum[:]) != shaderLibrarySum {
+	if gpu.SourceSum(shaderSource) != shaderLibrarySum {
 		t.Fatal("shader.metal changed since shaderlib.go was generated: run go generate ./internal/gpu/metal on macOS")
 	}
 	r, err := newRenderer()

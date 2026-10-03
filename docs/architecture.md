@@ -990,9 +990,13 @@ either.
   renderer draws these instances:
   - `internal/gpu/d3d11` with a shader compiled to DXBC ahead of time
     (`go generate ./internal/gpu/d3d11` on Windows, with the system's
-    `d3dcompiler_47.dll`), so apps carry no shader compiler, into a
-    flip-model swap chain on the surface's window, with WARP when no
-    hardware device works;
+    `d3dcompiler_47.dll`), so apps carry no shader compiler. The
+    generated file records the SHA-256 of the source it came from, line
+    endings aside (`gpu.SourceSum`), as Metal's does: bytecode older than
+    `shader.hlsl` falls back to compiling that with the same DLL, which
+    Windows has, and its test fails. It draws into a flip-model swap
+    chain on the surface's window, with WARP when no hardware device
+    works;
   - `internal/gpu/metal` with a shader in Metal Shading Language
     compiled into a Metal library ahead of time (`go generate
     ./internal/gpu/metal` on macOS, with Xcode's `metal` tools), which
@@ -1009,12 +1013,15 @@ either.
     which frees all but the one shown, until the next frame makes them
     again: an idle window keeps one frame of memory;
   - `internal/gpu/gl` with the shader in GLSL 3.30 or GLSL ES 3.00, which
-    the driver compiles when the renderer starts, into the framebuffer of
-    the GtkGLArea, which GTK shows. GL functions come from libepoxy, as
-    GTK's do. Instances draw from per-instance attributes, pointed at each
-    batch's first since OpenGL ES 3.0 has no base instance. The area's
-    `create-context` asks GDK for OpenGL 3.3, else OpenGL ES 3.0, as GPUs
-    with OpenGL ES alone have, and so does the probe below (`glContext`).
+    the driver compiles when the renderer starts, since these versions
+    have no compiled form every driver takes, and drivers keep what they
+    compiled between launches, as Mesa and NVIDIA's do. It draws into
+    the framebuffer of the GtkGLArea, which GTK shows. GL functions come
+    from libepoxy, as GTK's do. Instances draw from per-instance
+    attributes, pointed at each batch's first since OpenGL ES 3.0 has no
+    base instance. The area's `create-context` asks GDK for OpenGL 3.3,
+    else OpenGL ES 3.0, as GPUs with OpenGL ES alone have, and so does
+    the probe below (`glContext`).
 
   Linux draws with OpenGL only where it runs on a GPU: the backend makes
   one context, on a window that never shows, when the first surface is

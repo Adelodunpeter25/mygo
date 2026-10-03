@@ -40,24 +40,3 @@ type PageOptions struct {
 	// UserAgent overrides the user agent string.
 	UserAgent string
 }
-
-// pageOptions returns o.Page, completed with the fields it replaces.
-func (o *WindowOptions) pageOptions() PageOptions {
-	p := o.Page
-	if p.PreloadScript == "" {
-		p.PreloadScript = o.PreloadScript
-	}
-	if p.TrustedOrigins == nil {
-		p.TrustedOrigins = o.TrustedOrigins
-	}
-	if p.DevTools == DevToolsAuto {
-		p.DevTools = o.DevTools
-	}
-	if p.ZoomFactor == 0 {
-		p.ZoomFactor = o.ZoomFactor
-	}
-	if p.UserAgent == "" {
-		p.UserAgent = o.UserAgent
-	}
-	return p
-}

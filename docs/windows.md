@@ -202,9 +202,6 @@ page.URL()                // the current page
 page.SetZoomFactor(1.25)  // ZoomFactor
 ```
 
-Windows had these methods themselves before `Page`; they still work,
-deprecated, and will go.
-
 `WindowOptions.Page` sets up the page:
 
 ```go

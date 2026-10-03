@@ -33,26 +33,3 @@ func TestPage(t *testing.T) {
 		t.Errorf("EvalAs of no page: %v", err)
 	}
 }
-
-// The page methods and options windows had before Page keep working
-// until they go.
-func TestDeprecatedPageMethods(t *testing.T) {
-	w := NewWindow(WindowOptions{Hidden: true, UserAgent: "old", ZoomFactor: 2, TrustedOrigins: []string{"https://example.com"},
-		Page: PageOptions{UserAgent: "new"}})
-	t.Cleanup(w.Destroy)
-	fw := fb.Windows()[len(fb.Windows())-1]
-	if o := fw.Opts; o.UserAgent != "new" || o.Zoom != 2 {
-		t.Errorf("user agent %q, zoom %v: Page should win, the old fields fill in", o.UserAgent, o.Zoom)
-	}
-	if !w.isTrusted("https://example.com/page") {
-		t.Error("the deprecated TrustedOrigins were not trusted")
-	}
-	w.LoadURL("https://example.com/c")
-	if w.URL() != "https://example.com/c" || w.Page().URL() != w.URL() {
-		t.Errorf("URL %q", w.URL())
-	}
-	w.OpenDevTools()
-	if !w.IsDevToolsOpened() || !w.Page().IsDevToolsOpened() {
-		t.Error("OpenDevTools did not open them")
-	}
-}

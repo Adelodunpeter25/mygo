@@ -587,7 +587,7 @@ func TestFramelessResizeEdges(t *testing.T) {
 }
 
 func TestDockedDevTools(t *testing.T) {
-	w := newWindow(t, mygo.WindowOptions{Title: "DevTools", Width: 800, Height: 600, DevTools: mygo.DevToolsEnabled})
+	w := newWindow(t, mygo.WindowOptions{Title: "DevTools", Width: 800, Height: 600, Page: mygo.PageOptions{DevTools: mygo.DevToolsEnabled}})
 	w.Page().LoadHTML("<p>inspect me</p>", "")
 	waitFor(t, w, "document.readyState === 'complete'")
 	if !dockDevTools(w) {

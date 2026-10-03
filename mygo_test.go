@@ -160,7 +160,7 @@ func TestWindowOptions(t *testing.T) {
 	_, fw := testWindow(t, WindowOptions{
 		Title: "Custom", Width: 300, Height: 200, X: 10, Y: 20,
 		Hidden: true, DisableResize: true, BackgroundColor: "#11223380",
-		DevTools: DevToolsDisabled, PreloadScript: "window.x = 1", Parent: parent, URL: "https://example.com/",
+		Page: PageOptions{DevTools: DevToolsDisabled, PreloadScript: "window.x = 1"}, Parent: parent, URL: "https://example.com/",
 	})
 	o := fw.Opts
 	if o.Title != "Custom" || o.Width != 300 || o.Center || o.Resizable || o.DevTools {
@@ -434,7 +434,7 @@ func TestUntrustedOriginsCannotCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer Protocol.Unhandle("trusted")
-	_, fw := readyWindow(t, WindowOptions{TrustedOrigins: []string{"https://partner.example"}})
+	_, fw := readyWindow(t, WindowOptions{Page: PageOptions{TrustedOrigins: []string{"https://partner.example"}}})
 	cases := []struct {
 		url string
 		ok  bool

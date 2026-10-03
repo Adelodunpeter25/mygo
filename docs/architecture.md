@@ -147,7 +147,7 @@ rules are:
      it is a plain channel receive. **On the main thread it pumps native events
      with `Backend.Step`** until the value arrives; whoever produces the value
      calls `deliver`, which sends and then `Backend.Wake`s the loop. This is
-     what makes `win.Eval`, `CapturePage` and dialogs usable from event
+     what makes `Page.Eval`, `CapturePage` and dialogs usable from event
      listeners without deadlocking. Nested runs of the dispatch source are
      expected and safe.
 4. **Event listeners run on the main thread**, synchronously, so cancelable
@@ -701,9 +701,7 @@ as in Tauri:
   preload scripts, registered schemes) and registers the window.
 - A window's page API is on `Page`, a handle on the window that
   `Window.Page` returns unless the window shows native UI; the page's state
-  stays in `Window`, where IPC and the backend's callbacks reach it. The
-  page methods windows had before `Page` forward to it, deprecated, from
-  `window_deprecated.go`.
+  stays in `Window`, where IPC and the backend's callbacks reach it.
 - The user's close (`WindowHandler.ShouldClose`) and `Window.Close` both emit
   `OnClose`, which can be prevented. `Destroy` skips it. The backend reports
   `Closed` synchronously; the core unregisters the window, closes child

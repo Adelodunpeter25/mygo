@@ -147,17 +147,6 @@ type WindowOptions struct {
 	// Page configures the window's web page.
 	Page PageOptions
 
-	// Deprecated: Use Page.PreloadScript.
-	PreloadScript string
-	// Deprecated: Use Page.TrustedOrigins.
-	TrustedOrigins []string
-	// Deprecated: Use Page.DevTools.
-	DevTools DevTools
-	// Deprecated: Use Page.ZoomFactor.
-	ZoomFactor float64
-	// Deprecated: Use Page.UserAgent.
-	UserAgent string
-
 	// StateKey remembers the window's position, size, and maximized and
 	// full screen state under this key, in window-state.json in
 	// PathUserData, which is written when the window closes and when the
@@ -351,7 +340,7 @@ func newWindow(opts WindowOptions, bg *background, native uintptr) *Window {
 	id := windows.nextID
 	windows.Unlock()
 
-	w := &Window{id: id, parent: opts.Parent, trustedOrigins: opts.pageOptions().TrustedOrigins, secret: rand.Text(), stateKey: opts.StateKey, background: bg, content: opts.Content}
+	w := &Window{id: id, parent: opts.Parent, trustedOrigins: opts.Page.TrustedOrigins, secret: rand.Text(), stateKey: opts.StateKey, background: bg, content: opts.Content}
 	w.pg = &Page{w}
 	w.hiddenTitleBar = !opts.Frameless && (opts.TitleBarStyle == TitleBarHidden || opts.TitleBarStyle == TitleBarHiddenInset)
 	w.resetPage()
@@ -393,7 +382,7 @@ func newWindow(opts WindowOptions, bg *background, native uintptr) *Window {
 }
 
 func (w *Window) platformOptions(o *WindowOptions) *platform.WindowOptions {
-	po := o.pageOptions()
+	po := o.Page
 	p := &platform.WindowOptions{
 		Title:          o.Title,
 		X:              o.X,

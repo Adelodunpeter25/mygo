@@ -16,6 +16,8 @@ import (
 var (
 	accessTestsOnce               sync.Once
 	gSignalEmitString             func(obj ptr, signal *byte, s *byte)
+	gtkIMMulticontextGetContextID func(im ptr) ptr
+	gtkIMMulticontextSetContextID func(im ptr, id *byte)
 	atkObjectGetNAccessibleChild  func(obj ptr) int32
 	atkObjectRefAccessibleChild   func(obj ptr, i int32) ptr
 	atkObjectGetRole              func(obj ptr) int32
@@ -40,11 +42,21 @@ func surfaceByHandle(handle uintptr) *surface {
 }
 
 // TestSurrounding returns the text around the caret that input methods get
-// from a window showing native UI, and the caret's offset in runes.
+// from a window showing native UI, and the caret's offset in runes. GTK's
+// own input method reads it back: others, as fcitx5's, keep it to
+// themselves, so the window's input switches to GTK's.
 func TestSurrounding(handle uintptr) (text string, caret int, ok bool) {
 	s := surfaceByHandle(handle)
 	if s == nil {
 		return "", 0, false
+	}
+	if gtkIMMulticontextSetContextID == nil {
+		mustBind(libGTK, &gtkIMMulticontextGetContextID, "gtk_im_multicontext_get_context_id")
+		mustBind(libGTK, &gtkIMMulticontextSetContextID, "gtk_im_multicontext_set_context_id")
+	}
+	const simple = "gtk-im-context-simple"
+	if goStr(gtkIMMulticontextGetContextID(s.im)) != simple {
+		gtkIMMulticontextSetContextID(s.im, cs(simple))
 	}
 	var p ptr
 	var cursor int32

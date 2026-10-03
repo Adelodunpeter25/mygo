@@ -1132,22 +1132,13 @@ func (p *Page) EvalContext(ctx context.Context, code string) (any, error) {
 //
 //	title, err := mygo.EvalAs[string](win.Page(), "document.title")
 //
-// A window stands for its page until windows lose the page's methods.
-func EvalAs[T any, P *Page | *Window](p P, code string) (T, error) {
+// A nil page, as a window showing native UI has, returns an error.
+func EvalAs[T any](p *Page, code string) (T, error) {
 	var v T
-	var w *Window
-	switch p := any(p).(type) {
-	case *Page:
-		if p != nil {
-			w = p.w
-		}
-	case *Window:
-		w = p
-	}
-	if w == nil {
+	if p == nil {
 		return v, errNoPage
 	}
-	raw, err := w.eval(context.Background(), code)
+	raw, err := p.w.eval(context.Background(), code)
 	if err != nil || len(raw) == 0 {
 		return v, err
 	}

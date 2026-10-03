@@ -1008,7 +1008,11 @@ either.
   renderer's work on an animated page; and once a window has a GL context
   GTK composites it with OpenGL, so the choice is made before any surface
   has one; `MYGO_GPU=1` skips it and draws with OpenGL wherever GDK makes a
-  context, as the GUI tests of CI do on llvmpipe. A GtkGLArea shows only
+  context, as the GUI tests of CI do on llvmpipe. The context loads Mesa
+  for good, about 20 MB, so the devices answer first where they can: no
+  probe without NVIDIA's devices or a render node of a DRM driver with 3D
+  (simpledrm, bochs, VirtualBox's or Hyper-V's only show what the CPU
+  drew), nor on WSL's device without `GALLIUM_DRIVER=d3d12`. A GtkGLArea shows only
   what OpenGL draws into it: when its GL renderer fails all the same, the
   frames drawn in memory go through OpenGL too (`gl.Presenter` uploads
   them and blits them into the area's framebuffer).

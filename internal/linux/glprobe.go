@@ -52,7 +52,11 @@ func gpuGL() bool {
 		// Without a GPU device, GL draws on the CPU: the probe, whose
 		// driver stays loaded, would cost memory to say so.
 		if !gpuDevice() {
-			log.Print("mygo: native UI draws without the GPU: there is none")
+			if _, err := os.Stat("/dev/dxg"); err == nil {
+				log.Print("mygo: native UI draws without the GPU: Mesa draws on the CPU in WSL, unless GALLIUM_DRIVER=d3d12")
+			} else {
+				log.Print("mygo: native UI draws without the GPU: there is none")
+			}
 			return
 		}
 		renderer, err := probeGL()
@@ -194,13 +198,33 @@ func failed(gerr ptr) string {
 	return "no OpenGL context"
 }
 
-// gpuDevice reports whether the system has a device a GPU driver could
-// use: a DRM node, NVIDIA's, or WSL's.
-func gpuDevice() bool {
-	for _, pattern := range []string{"/dev/dri/*", "/dev/nvidia*", "/dev/dxg"} {
-		if m, _ := filepath.Glob(pattern); len(m) > 0 {
-			return true
+// gpuDevice reports whether the system has a device OpenGL could draw on:
+// NVIDIA's, or a render node of a DRM driver with 3D. Mesa draws on the
+// CPU, loading as much as the probe would for nothing, on display-only
+// drivers, as virtual machines and servers have, and on WSL's device
+// unless GALLIUM_DRIVER=d3d12 gives it the GPU.
+func gpuDevice() bool { return gpuDeviceIn("/", os.Getenv("GALLIUM_DRIVER")) }
+
+// displayOnly are DRM drivers that only show what the CPU drew.
+var displayOnly = map[string]bool{
+	"simpledrm": true, "simple-framebuffer": true, "bochs": true, "bochs-drm": true, "cirrus": true,
+	"cirrus-qemu": true, "vboxvideo": true, "hyperv_drm": true, "ast": true, "mgag200": true, "udl": true,
+	"vkms": true,
+}
+
+func gpuDeviceIn(root, gallium string) bool {
+	if m, _ := filepath.Glob(filepath.Join(root, "dev", "nvidia*")); len(m) > 0 {
+		return true
+	}
+	nodes, _ := filepath.Glob(filepath.Join(root, "sys", "class", "drm", "renderD*"))
+	for _, node := range nodes {
+		driver, err := os.Readlink(filepath.Join(node, "device", "driver"))
+		if err != nil || !displayOnly[filepath.Base(driver)] {
+			return true // a GPU's, or one to probe
 		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "dev", "dxg")); err == nil {
+		return gallium == "d3d12"
 	}
 	return false
 }

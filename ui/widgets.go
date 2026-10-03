@@ -392,15 +392,55 @@ func DecodeBitmap(data []byte) (*Bitmap, error) {
 // Size returns the bitmap's size in pixels, which Image shows as DIPs.
 func (b *Bitmap) Size() (w, h int) { return b.w, b.h }
 
-// Image creates an element showing a bitmap, by default at its size in
-// pixels as DIPs, scaled to fit when given another size.
-func Image(c *Context, b *Bitmap) *Element {
+func (b *Bitmap) imageSize() (float32, float32) {
+	if b == nil {
+		return 0, 0
+	}
+	return float32(b.w), float32(b.h)
+}
+
+// ImageSource is what Image shows: a *Bitmap, or an *SVG in its own
+// colors.
+type ImageSource interface {
+	imageSize() (w, h float32)
+}
+
+// Image creates an element showing a bitmap, or an SVG in its own colors
+// (with the text color for its currentColor), by default at its size as
+// DIPs, scaled to fit when given another size.
+func Image(c *Context, src ImageSource) *Element {
 	e := c.newElement(kindImage)
-	e.image = b
-	if b != nil && b.h > 0 {
-		e.aspect = float32(b.w) / float32(b.h)
+	switch s := src.(type) {
+	case *Bitmap:
+		e.image = s
+	case *SVG:
+		e.svg = s
+	}
+	if src != nil {
+		if w, h := src.imageSize(); h > 0 {
+			e.aspect = w / h
+		}
 	}
 	return e
+}
+
+// intrinsicSize returns the size of an image's picture, or of an icon: as
+// high as the font size.
+func (e *Element) intrinsicSize() (w, h float32) {
+	switch e.kind {
+	case kindImage:
+		if e.image != nil {
+			return e.image.imageSize()
+		}
+		return e.svg.imageSize()
+	case kindIcon:
+		em := e.resolvedText().size
+		if s := e.svg; s != nil && s.h > 0 {
+			return em * s.w / s.h, em
+		}
+		return em, em
+	}
+	return 0, 0
 }
 
 // Fit sets how an Image fills its box.

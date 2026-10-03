@@ -50,6 +50,38 @@ type gallery struct {
 
 var pages = []string{"Overview", "Controls", "Text", "List", "Drawing", "Overlays"}
 
+// icon parses the shapes of a 24×24 stroked icon, drawn in currentColor
+// as icon sets draw them.
+func icon(shapes string) *ui.SVG {
+	return ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">` + shapes + `</svg>`))
+}
+
+// The icons of the pages, and two for buttons.
+var (
+	pageIcons = map[string]*ui.SVG{
+		"Overview": icon(`<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>`),
+		"Controls": icon(`<path d="M4 7h10M18 7h2M4 17h2M10 17h10"/><circle cx="16" cy="7" r="2"/><circle cx="8" cy="17" r="2"/>`),
+		"Text":     icon(`<path d="M5 6V5h14v1M12 5v14M9 19h6"/>`),
+		"List":     icon(`<path d="M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01"/>`),
+		"Drawing":  icon(`<path d="M15 5l4 4M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5z"/>`),
+		"Overlays": icon(`<path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/>`),
+	}
+	starIcon  = icon(`<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>`)
+	checkIcon = icon(`<path d="M20 6 9 17l-5-5"/>`)
+	// A picture in its own colors: gradients, a clip path, and a dot in
+	// currentColor.
+	badge = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+	<defs>
+		<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#ec4899"/></linearGradient>
+		<radialGradient id="glow" cx=".35" cy=".3" r=".6"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+		<clipPath id="round"><rect width="120" height="120" rx="28"/></clipPath>
+	</defs>
+	<g clip-path="url(#round)"><rect width="120" height="120" fill="url(#bg)"/><circle cx="42" cy="36" r="60" fill="url(#glow)"/></g>
+	<path d="M34 78 60 34l26 44z" fill="none" stroke="#fff" stroke-width="9" stroke-linejoin="round"/>
+	<circle cx="60" cy="64" r="7" fill="currentColor"/>
+</svg>`))
+)
+
 func (g *gallery) view(c *ui.Context) {
 	ui.Row(c).Fill().AlignItems(ui.Stretch).Children(func() {
 		g.sidebar(c)
@@ -85,7 +117,7 @@ func (g *gallery) sidebar(c *ui.Context) {
 	side.Children(func() {
 		ui.Text(c, "MyGo UI").FontSize(13).Bold().TextColor(t.TextMuted).Padding(4, 10, 10)
 		for _, p := range pages {
-			item := ui.Row(c).Key(p).Padding(7, 10).Radius(6).Focusable()
+			item := ui.Row(c).Key(p).Padding(7, 10).Gap(10).Radius(6).Focusable()
 			if p == g.page {
 				item.Background(t.Accent).TextColor(t.AccentText)
 			} else if item.Hovered() {
@@ -94,7 +126,11 @@ func (g *gallery) sidebar(c *ui.Context) {
 			if item.Clicked() {
 				g.page = p
 			}
-			item.Children(func() { ui.Text(c, p) })
+			// Icons take the text color: the accent's when selected.
+			item.Children(func() {
+				ui.Icon(c, pageIcons[p]).FontSize(16)
+				ui.Text(c, p)
+			})
 		}
 		ui.Spacer(c)
 		ui.Text(c, g.now.Format("15:04:05")).FontSize(12).TextColor(t.TextMuted).Padding(0, 10)
@@ -379,6 +415,25 @@ func (g *gallery) drawing(c *ui.Context) {
 		p.Text(r.X+24, r.Y+20, "Animated at the display's rate", 14, t.Text)
 	})
 	c.AnimationFrame()
+	card(c, "Vector images", func() {
+		ui.Text(c, "SVGs stay sharp at any size: icons in the color of the text, pictures in their own colors.").TextColor(t.TextMuted)
+		gold := ui.RGB(245, 180, 0)
+		ui.Row(c).Gap(14).Children(func() {
+			for _, size := range []float32{16, 24, 40} {
+				ui.Icon(c, starIcon).FontSize(size).TextColor(gold)
+			}
+			// A button lays out its children in a row.
+			done := ui.PrimaryButton(c, "").Children(func() {
+				ui.Icon(c, checkIcon)
+				ui.Text(c, "Done").SingleLine()
+			})
+			if done.Clicked() {
+				c.Toast("Done")
+			}
+			ui.Image(c, badge).Size(64, 64).TextColor(gold)
+			ui.Image(c, badge).Size(32, 32).TextColor(gold)
+		})
+	})
 }
 
 func (g *gallery) overlays(c *ui.Context) {

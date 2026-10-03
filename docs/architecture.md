@@ -952,6 +952,13 @@ either.
   `CTFontDrawGlyphs`, cairo), at four subpixel offsets, into a coverage
   atlas, and color glyphs (emoji) into a color atlas; paths drawn with
   `Painter` are masks in the coverage atlas, rasterized by `internal/vec`.
+  So are icons: `internal/svg` parses SVG documents (with `encoding/xml`
+  and its own small CSS cascade) into nodes of paths, paints and layers,
+  and draws them on the CPU with `internal/vec`, compositing gradients,
+  group opacity, clip paths and masks in layers of premultiplied pixels;
+  `ui.Icon` keeps the coverage of that drawing for each size, which the
+  GPU tints like a glyph, and `ui.Image` the colored pixels, as images
+  whose textures it updates in place when only the text color changes.
   An atlas logs the rectangles that change, so renderers upload only those.
   DirectWrite methods taking floats are called through purego, which sets
   the floating point registers that `syscall` leaves alone on ARM64.
@@ -1249,7 +1256,7 @@ profile).
 | CLI | `go test ./cmd/mygo` | config, Info.plist, icons, universal binaries, template, dev launch/ready/stop (the test binary plays the app), watcher and `go list` inputs, resources (platform directories, universal pairs, staging, conflicts, dev placement; builds for every OS), frontend embedding (compiles an app with the overlay), `.DS_Store` against a dmgbuild golden file, a real DMG (`hdiutil`); builds and tools are skipped with `-short` |
 | runtime | `bun run test` | the injected runtime, `mygo-runtime` and the plugins' packages (against a fake Go side on the real runtime, `plugins/fake-go.ts`) |
 | plugins | `go test ./plugins/...` | the fetch plugin against `httptest` servers, the WebSocket client against a test server (ordering, fragments, pings, closing handshakes) |
-| native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS, OpenGL on Linux); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; `go test -run '^$' -bench . ./ui` times a frame |
+| native UI | `go test ./ui ./internal/text ./internal/scene ./internal/raster ./internal/svg ./internal/gpu/...` | the GPU renderers against the CPU renderer (Direct3D on Windows, Metal on macOS, OpenGL on Linux); views through `Tester`: input, focus, editing, lists, overlays, frames that fill the glyph atlas; text layout and caret geometry; atlas zones and repacking; the CPU renderer against its formulas; SVG parsing and drawing, with `FuzzParse`; `go test -run '^$' -bench . ./ui` times a frame |
 | GUI | `MYGO_E2E=1 go test ./internal/e2e` | the real backend: IPC, channels, protocol, Eval, geometry, capture, menus, window.open, native UI (frames, clicks, input methods replacing typed text, file drops, assistive technology reading and acting; on macOS typing, skipped while an input method is selected, and composing; on Linux with `MYGO_GPU=1`, what OpenGL drew in the GtkGLArea); on Windows too (a GitHub Actions `windows-latest` runner has WebView2) |
 
 The XDG variables let the URL scheme test check that GLib opens the scheme

@@ -64,6 +64,7 @@ const (
 	kindText
 	kindImage
 	kindInput
+	kindIcon
 )
 
 // flags of an element.
@@ -182,6 +183,7 @@ type Element struct {
 	maxLines int
 	single   bool
 	image    *Bitmap
+	svg      *SVG // of an Icon, or an Image in its own colors
 	fit      Fit
 	label    string
 	// widget names the widget that used the element's state as it created

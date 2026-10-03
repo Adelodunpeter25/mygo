@@ -42,6 +42,7 @@ type engine struct {
 	text  *text.System
 	scene scene.Scene
 	paths paths
+	svgs  svgs
 	flex  flexScratch
 
 	states map[uint64]*state
@@ -200,6 +201,7 @@ func (rt *engine) runFrame() {
 	}
 	rt.host.present(&rt.scene)
 	rt.prune()
+	rt.prunePictures()
 	rt.text.EndFrame()
 	rt.regs, rt.nextRegs = rt.nextRegs, rt.regs
 	rt.updateTextInput()

@@ -51,13 +51,14 @@ var (
 	gtkGLAreaSetRequiredVersion func(a ptr, major, minor int32)
 	gtkGLAreaSetHasAlpha        func(a ptr, alpha bool)
 	gtkGLAreaGetError           func(a ptr) ptr
+	gtkGLAreaSetError           func(a, gerr ptr)
 	gdkWindowPeekChildren       func(w ptr) ptr
 	gdkWindowGetUserData        func(w ptr, data *ptr)
 
 	cbSurfaceDraw, cbSurfaceSize, cbSurfaceRealize, cbSurfaceButton ptr
 	cbSurfaceMotion, cbSurfaceLeave, cbSurfaceScroll, cbSurfaceKey  ptr
 	cbSurfaceFocusIn, cbSurfaceFocusOut, cbSurfaceScale, cbIMCommit ptr
-	cbIMPreedit, cbIMPreeditEnd, cbSurfaceRender                    ptr
+	cbIMPreedit, cbIMPreeditEnd, cbSurfaceRender, cbAreaContext     ptr
 	surfaceCursors                                                  = map[platform.Cursor]ptr{}
 )
 
@@ -91,7 +92,8 @@ func loadSurface() {
 		mustBind(d, &gdkWindowGetUserData, "gdk_window_get_user_data")
 		// GtkGLArea came in GTK 3.16.
 		if !bind(t, &gtkGLAreaNew, "gtk_gl_area_new") || !bind(t, &gtkGLAreaSetRequiredVersion, "gtk_gl_area_set_required_version") ||
-			!bind(t, &gtkGLAreaSetHasAlpha, "gtk_gl_area_set_has_alpha") || !bind(t, &gtkGLAreaGetError, "gtk_gl_area_get_error") {
+			!bind(t, &gtkGLAreaSetHasAlpha, "gtk_gl_area_set_has_alpha") || !bind(t, &gtkGLAreaGetError, "gtk_gl_area_get_error") ||
+			!bind(t, &gtkGLAreaSetError, "gtk_gl_area_set_error") {
 			gtkGLAreaNew = nil
 		}
 	})
@@ -144,6 +146,7 @@ func (s *surface) newArea(gl bool) {
 	if gl {
 		gtkGLAreaSetRequiredVersion(s.area, 3, 3)
 		gtkGLAreaSetHasAlpha(s.area, true)
+		connect(s.area, "create-context", cbAreaContext, data)
 		connect(s.area, "render", cbSurfaceRender, data)
 	}
 	s.gl = gl
@@ -396,6 +399,16 @@ func initSurfaceCallbacks() {
 		s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
 		s.cr = 0
 		return true
+	})
+	// The GtkGLArea's context: OpenGL 3.3, else OpenGL ES 3.0. One GDK
+	// cannot make leaves the area its error, so that it draws with cairo.
+	cbAreaContext = purego.NewCallback(func(area, data ptr) ptr {
+		ctx, gerr := glContext(gtkWidgetGetWindow(area))
+		if gerr != 0 {
+			gtkGLAreaSetError(area, gerr)
+			gErrorFree(gerr)
+		}
+		return ctx
 	})
 	cbSurfaceRender = purego.NewCallback(func(area, context, data ptr) bool {
 		s := b().surfaceOf(data)

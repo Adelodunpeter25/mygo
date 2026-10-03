@@ -23,17 +23,26 @@ const (
 	eglSurfaceType           = 0x3033
 	eglPbufferBit            = 0x0001
 	eglOpenGLAPI             = 0x30A2
+	eglOpenGLESAPI           = 0x30A0
+	eglOpenGLES3Bit          = 0x0040 // EGL_OPENGL_ES3_BIT_KHR
 	eglContextMajorVersion   = 0x3098
 	eglContextMinorVersion   = 0x30FB
 	eglContextProfileMask    = 0x30FD
 	eglContextCoreProfileBit = 0x1
 )
 
-// offscreen makes an OpenGL 3.3 context current on the calling thread,
-// without a window, with Mesa's surfaceless EGL platform, and binds a
-// framebuffer of w×h pixels. read returns its pixels as the CPU renderer
-// draws them: premultiplied BGRA rows from the top.
-func offscreen(t *testing.T, w, h int) (read func() []byte) {
+// apis are the APIs the renderer draws with: OpenGL 3.3 and OpenGL ES 3.0.
+var apis = []struct {
+	name string
+	es   bool
+}{{"OpenGL", false}, {"OpenGL ES", true}}
+
+// offscreen makes an OpenGL 3.3 context, or with es an OpenGL ES 3.0 one,
+// current on the calling thread, without a window, with Mesa's surfaceless
+// EGL platform, and binds a framebuffer of w×h pixels. read returns its
+// pixels as the CPU renderer draws them: premultiplied BGRA rows from the
+// top.
+func offscreen(t *testing.T, es bool, w, h int) (read func() []byte) {
 	runtime.LockOSThread()
 	t.Cleanup(runtime.UnlockOSThread)
 	lib, err := purego.Dlopen("libEGL.so.1", purego.RTLD_NOW|purego.RTLD_GLOBAL)
@@ -66,18 +75,21 @@ func offscreen(t *testing.T, w, h int) (read func() []byte) {
 		t.Skip("no surfaceless EGL display")
 	}
 	t.Cleanup(func() { terminate(display) })
-	bindAPI(eglOpenGLAPI)
+	api, bit, contextAttribs := uint32(eglOpenGLAPI), int32(eglOpenGLBit), []int32{eglContextMajorVersion, 3, eglContextMinorVersion, 3, eglContextProfileMask, eglContextCoreProfileBit, eglNone}
+	if es {
+		api, bit, contextAttribs = eglOpenGLESAPI, eglOpenGLES3Bit, []int32{eglContextMajorVersion, 3, eglContextMinorVersion, 0, eglNone}
+	}
+	bindAPI(api)
 	// Configurations are for windows unless asked otherwise.
-	configAttribs := []int32{eglRenderableType, eglOpenGLBit, eglSurfaceType, eglPbufferBit, eglNone}
+	configAttribs := []int32{eglRenderableType, bit, eglSurfaceType, eglPbufferBit, eglNone}
 	var config uintptr
 	var n int32
 	if chooseConfig(display, &configAttribs[0], &config, 1, &n) == 0 || n == 0 {
-		t.Skip("no EGL configuration for OpenGL")
+		t.Skip("no EGL configuration for the API")
 	}
-	contextAttribs := []int32{eglContextMajorVersion, 3, eglContextMinorVersion, 3, eglContextProfileMask, eglContextCoreProfileBit, eglNone}
 	context := createContext(display, config, 0, &contextAttribs[0])
 	if context == 0 {
-		t.Skip("no OpenGL 3.3 context")
+		t.Skip("no context of the version")
 	}
 	t.Cleanup(func() {
 		makeCurrent(display, 0, 0, 0)
@@ -114,36 +126,46 @@ func offscreen(t *testing.T, w, h int) (read func() []byte) {
 }
 
 func TestDrawsAsTheCPURenderer(t *testing.T) {
-	s := gputest.Scene()
-	read := offscreen(t, s.Width, s.Height)
-
-	r, err := New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Release()
-	// Twice: the second frame updates what the first uploaded.
-	for range 2 {
-		if err := r.Render(s); err != nil {
-			t.Fatal(err)
-		}
-		gputest.Compare(t, "gl", read(), s.Width*4, s)
+	for _, api := range apis {
+		t.Run(api.name, func(t *testing.T) {
+			s := gputest.Scene()
+			read := offscreen(t, api.es, s.Width, s.Height)
+			r, err := New()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer r.Release()
+			if r.es != api.es {
+				t.Fatalf("the renderer takes the context for OpenGL ES: %v", r.es)
+			}
+			// Twice: the second frame updates what the first uploaded.
+			for range 2 {
+				if err := r.Render(s); err != nil {
+					t.Fatal(err)
+				}
+				gputest.Compare(t, "gl", read(), s.Width*4, s)
+			}
+		})
 	}
 }
 
 func TestPresentsFramesDrawnInMemory(t *testing.T) {
-	s := gputest.Scene()
-	read := offscreen(t, s.Width, s.Height)
-	want := raster.NewImage(s.Width, s.Height)
-	raster.Render(want, s)
-	var p Presenter
-	// Twice: the second frame reuses the texture.
-	for range 2 {
-		if err := p.Present(want.Pix, want.Stride, want.W, want.H); err != nil {
-			t.Fatal(err)
-		}
-		if got := read(); !bytes.Equal(got, want.Pix[:len(got)]) {
-			t.Fatal("the frame presented differs from the frame drawn")
-		}
+	for _, api := range apis {
+		t.Run(api.name, func(t *testing.T) {
+			s := gputest.Scene()
+			read := offscreen(t, api.es, s.Width, s.Height)
+			want := raster.NewImage(s.Width, s.Height)
+			raster.Render(want, s)
+			var p Presenter
+			// Twice: the second frame reuses the texture.
+			for range 2 {
+				if err := p.Present(want.Pix, want.Stride, want.W, want.H); err != nil {
+					t.Fatal(err)
+				}
+				if got := read(); !bytes.Equal(got, want.Pix[:len(got)]) {
+					t.Fatal("the frame presented differs from the frame drawn")
+				}
+			}
+		})
 	}
 }

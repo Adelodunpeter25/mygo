@@ -983,7 +983,9 @@ either.
     the driver compiles when the renderer starts, into the framebuffer of
     the GtkGLArea, which GTK shows. GL functions come from libepoxy, as
     GTK's do. Instances draw from per-instance attributes, pointed at each
-    batch's first since OpenGL ES 3.0 has no base instance.
+    batch's first since OpenGL ES 3.0 has no base instance. The area's
+    `create-context` asks GDK for OpenGL 3.3, else OpenGL ES 3.0, as GPUs
+    with OpenGL ES alone have, and so does the probe below (`glContext`).
 
   Linux draws with OpenGL only where it runs on a GPU: the backend makes
   one context, on a window that never shows, when the first surface is
@@ -1022,7 +1024,8 @@ either.
   The GPU renderers' tests draw `gputest.Scene` and compare it with the
   CPU renderer's drawing: on Windows in a hidden window, on macOS into an
   offscreen texture, on Linux into a framebuffer of a context EGL makes
-  without a window (Mesa's surfaceless platform, llvmpipe without a GPU).
+  without a window (Mesa's surfaceless platform, llvmpipe without a GPU),
+  once with OpenGL 3.3 and once with OpenGL ES 3.0.
 
 A new widget composes elements (`ui/widgets.go`), keeps what it needs from
 frame to frame with `Local` or in `state`, declares its interaction with

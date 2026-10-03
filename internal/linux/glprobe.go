@@ -78,23 +78,76 @@ func softwareGL(renderer string) bool {
 	return false
 }
 
+// gdkGL holds GDK's functions of OpenGL contexts.
+var gdkGL struct {
+	once           sync.Once
+	ok             bool
+	createContext  func(w ptr, err *ptr) ptr
+	requireVersion func(c ptr, major, minor int32)
+	setUseES       func(c ptr, use int32) // GTK 3.22
+	realize        func(c ptr, err *ptr) bool
+}
+
+func loadGDKGL() bool {
+	g := &gdkGL
+	g.once.Do(func() {
+		g.ok = bind(libGDK, &g.createContext, "gdk_window_create_gl_context") &&
+			bind(libGDK, &g.requireVersion, "gdk_gl_context_set_required_version") &&
+			bind(libGDK, &g.realize, "gdk_gl_context_realize")
+		if !bind(libGDK, &g.setUseES, "gdk_gl_context_set_use_es") {
+			g.setUseES = nil
+		}
+	})
+	return g.ok
+}
+
+// glContext makes and realizes an OpenGL context for a GdkWindow, as the
+// renderer draws with: OpenGL 3.3, else OpenGL ES 3.0, for GPUs with
+// OpenGL ES alone and GDK_GL=gles. It returns the context, or the GError of
+// the last try.
+func glContext(win ptr) (ctx, gerr ptr) {
+	if !loadGDKGL() {
+		return 0, 0
+	}
+	g := &gdkGL
+	for _, es := range []bool{false, true} {
+		if es && g.setUseES == nil {
+			break
+		}
+		if gerr != 0 {
+			gErrorFree(gerr)
+			gerr = 0
+		}
+		if ctx = g.createContext(win, &gerr); ctx == 0 {
+			return 0, gerr
+		}
+		if es {
+			g.setUseES(ctx, 1)
+			g.requireVersion(ctx, 3, 0)
+		} else {
+			g.requireVersion(ctx, 3, 3)
+		}
+		if g.realize(ctx, &gerr) {
+			return ctx, 0
+		}
+		gObjectUnref(ctx)
+	}
+	return 0, gerr
+}
+
 // probeGL makes an OpenGL context as a GtkGLArea would and returns the name
 // of its renderer, or why there is none.
 func probeGL() (renderer, failure string) {
 	var (
-		windowNew      func(parent ptr, attr *gdkWindowAttr, mask int32) ptr
-		windowDestroy  func(w ptr)
-		createContext  func(w ptr, err *ptr) ptr
-		requireVersion func(c ptr, major, minor int32)
-		realizeContext func(c ptr, err *ptr) bool
-		makeCurrent    func(c ptr)
-		clearCurrent   func()
-		getString      func(name uint32) ptr
-		haveSyms       = true
+		windowNew     func(parent ptr, attr *gdkWindowAttr, mask int32) ptr
+		windowDestroy func(w ptr)
+		makeCurrent   func(c ptr)
+		clearCurrent  func()
+		getString     func(name uint32) ptr
+		haveSyms      = loadGDKGL()
 	)
 	for name, fn := range map[string]any{
-		"gdk_window_new": &windowNew, "gdk_window_destroy": &windowDestroy, "gdk_window_create_gl_context": &createContext,
-		"gdk_gl_context_set_required_version": &requireVersion, "gdk_gl_context_realize": &realizeContext,
+		"gdk_window_new": &windowNew, "gdk_window_destroy": &windowDestroy,
 		"gdk_gl_context_make_current": &makeCurrent, "gdk_gl_context_clear_current": &clearCurrent,
 	} {
 		haveSyms = bind(libGDK, fn, name) && haveSyms
@@ -122,16 +175,11 @@ func probeGL() (renderer, failure string) {
 		windowDestroy(win)
 		gObjectUnref(win) // with the GL context GDK made for painting it
 	}()
-	var gerr ptr
-	ctx := createContext(win, &gerr)
+	ctx, gerr := glContext(win)
 	if ctx == 0 {
 		return "", failed(gerr)
 	}
 	defer gObjectUnref(ctx)
-	requireVersion(ctx, 3, 3)
-	if !realizeContext(ctx, &gerr) {
-		return "", failed(gerr)
-	}
 	makeCurrent(ctx)
 	defer clearCurrent()
 	const glRenderer = 0x1F01

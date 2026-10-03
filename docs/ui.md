@@ -666,6 +666,13 @@ rounded rectangles, borders, gradients and shadows from the distance to
 their edges, so they stay sharp at any size and scale, and text comes
 from a glyph atlas that only uploads what changes.
 
+On macOS, frames that change little, such as a clock ticking, typing or
+the pointer over a button, are drawn on the CPU, which redraws only what
+changed, and go to the screen without waking the GPU: they take less
+time than the GPU takes to start, and spare the memory Metal's driver
+holds for a couple of seconds after each frame it draws. Scrolling,
+resizing and animations of much of the window use the GPU.
+
 Where OpenGL would not run on a GPU, as in virtual machines or in WSL
 (where `GALLIUM_DRIVER=d3d12` gives Mesa the GPU), Linux draws the same
 pixels on the CPU: a few milliseconds for a whole large window on a

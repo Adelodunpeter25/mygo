@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"image"
 	"testing"
 	"time"
 
@@ -161,4 +162,83 @@ func TestNoGPUFromTheStart(t *testing.T) {
 	if tries != 1 || s.pixels != 0 || h.degraded || !h.retryAt.IsZero() {
 		t.Errorf("software from the start: %d tries, degraded %v, retry at %v", tries, h.degraded, h.retryAt)
 	}
+}
+
+// pixelGPU is a GPU renderer that also presents frames drawn in memory, as
+// Metal's does.
+type pixelGPU struct {
+	testGPU
+	pixels int
+	damage []image.Rectangle
+}
+
+func (g *pixelGPU) PresentPixels(pix []byte, stride, width, height int, scale float64, damage []image.Rectangle) error {
+	g.pixels++
+	g.damage = append(g.damage[:0], damage...)
+	return nil
+}
+
+// TestSmallChangesDrawOnCPU checks which frames the CPU draws and which
+// the GPU does.
+func TestSmallChangesDrawOnCPU(t *testing.T) {
+	g := &pixelGPU{}
+	h, s, frame := gpuHost(t, func() (gpuRenderer, error) { return g, nil })
+	x, back := float32(10), RGB(200, 200, 200)
+	h.rt = newRuntime(func(c *Context) {
+		Box(c).Fill().Background(back).Children(func() {
+			Box(c).Size(10, 10).Background(RGB(0, 0, 255)).Absolute().Left(x).Top(10)
+		})
+	}, h)
+	pause := func() { h.lastFrame = time.Now().Add(-time.Second) }
+	check := func(what string, pixels, frames int) {
+		t.Helper()
+		if g.pixels != pixels || g.frames != frames || s.pixels != 0 {
+			t.Fatalf("%s: %d frames drawn on the CPU, %d on the GPU, %d in memory without the GPU", what, g.pixels, g.frames, s.pixels)
+		}
+	}
+	frame()
+	check("the first frame", 1, 0)
+	if len(g.damage) != 1 || g.damage[0] != image.Rect(0, 0, 200, 100) {
+		t.Errorf("the first frame changed %v", g.damage)
+	}
+	// A small change after a pause, and in a burst.
+	pause()
+	x = 30
+	frame()
+	check("a small change after a pause", 2, 0)
+	if len(g.damage) == 0 || g.damage[0].Dx() > 40 || g.damage[0].Dy() > 20 {
+		t.Errorf("moving the square changed %v", g.damage)
+	}
+	x = 40
+	frame()
+	check("a small change in a burst", 3, 0)
+	// Much of the window in a burst goes to the GPU, and back to the CPU
+	// after a pause.
+	back = RGB(100, 100, 100)
+	frame()
+	check("a large change in a burst", 3, 1)
+	pause()
+	x = 50
+	frame()
+	check("a small change after a pause, the CPU's frame being old", 4, 1)
+	if len(g.damage) != 1 || g.damage[0] != image.Rect(0, 0, 200, 100) {
+		t.Errorf("catching up changed %v", g.damage)
+	}
+	// The CPU's frame goes once the GPU has drawn alone for a second.
+	back = RGB(50, 50, 50)
+	frame()
+	check("a large change", 4, 2)
+	if h.soft.Image.Pix == nil {
+		t.Fatal("the CPU's frame went at once")
+	}
+	h.gpuSinceCPU = time.Now().Add(-2 * time.Second)
+	back = RGB(60, 60, 60)
+	frame()
+	check("a large change, a second later", 4, 3)
+	if h.soft.Image.Pix != nil {
+		t.Error("the CPU's frame stays while the GPU draws alone")
+	}
+	pause()
+	frame()
+	check("the next frame after a pause", 5, 3)
 }

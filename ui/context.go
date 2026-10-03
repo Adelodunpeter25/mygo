@@ -23,6 +23,8 @@ type Context struct {
 	w, h     float32
 	titleBar TitleBar
 	overlay  *Element
+	// tree is the Tree being built, for its items.
+	tree *treeBuild
 }
 
 const chunkSize = 256
@@ -46,6 +48,7 @@ func (c *Context) reset(now time.Time, w, h float32) {
 	c.now = now
 	c.w, c.h = w, h
 	c.theme = c.rt.defaultTheme()
+	c.tree = nil
 	root := c.alloc()
 	root.c = c
 	root.id = 1

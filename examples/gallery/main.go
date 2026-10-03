@@ -37,6 +37,9 @@ type gallery struct {
 	tab     int
 	split   float32
 	copies  float64
+	file    int
+	tree    map[string]bool
+	leaf    string
 	dialog  bool
 	menu    bool
 	files   []string
@@ -97,9 +100,9 @@ func (g *gallery) sidebar(c *ui.Context) {
 	})
 }
 
-func card(c *ui.Context, title string, body func()) {
+func card(c *ui.Context, title string, body func()) *ui.Element {
 	t := c.Theme()
-	ui.Column(c).Padding(18).Gap(12).Radius(10).Background(t.Background).Border(1, t.Border).
+	return ui.Column(c).Padding(18).Gap(12).Radius(10).Background(t.Background).Border(1, t.Border).
 		Shadow(0, 1, 3, 0, ui.RGBA(0, 0, 0, 0.06)).Children(func() {
 		if title != "" {
 			ui.Text(c, title).FontSize(15).Bold()
@@ -305,6 +308,43 @@ func (g *gallery) list(c *ui.Context) {
 			ui.Textf(c, "%d²  =  %d", n, n*n).Font("monospace").FontSize(12)
 		})
 	}).Height(420).Border(1, t.Border).Radius(8).Padding(4)
+	ui.Row(c).Gap(18).AlignItems(ui.Stretch).Height(260).Children(func() {
+		card(c, "Tree", func() {
+			item := func(path, label string, children func()) {
+				var open *bool
+				if children != nil {
+					o := g.tree[path]
+					open = &o
+					defer func() { g.tree[path] = o }()
+				}
+				if ui.TreeItem(c, label, open, children).Selected(g.leaf == path).Clicked() {
+					g.leaf = path
+				}
+			}
+			ui.Tree(c, func() {
+				item("ui", "ui", func() {
+					item("ui/widgets.go", "widgets.go", nil)
+					item("ui/text", "text", func() {
+						item("ui/text/layout.go", "layout.go", nil)
+					})
+				})
+				item("go.mod", "go.mod", nil)
+			})
+		}).Width(220)
+		files := []string{"report.pdf", "photo.jpg", "notes.md", "budget.xlsx", "slides.key", "song.mp3"}
+		card(c, "Table", func() {
+			cols := []ui.TableColumn{{Title: "Name"}, {Title: "Size", Width: 90, Align: ui.End}}
+			if ui.Table(c, cols, len(files), &g.file, func(row, col int) {
+				if col == 0 {
+					ui.Text(c, files[row]).SingleLine()
+				} else {
+					ui.Textf(c, "%d KB", (row+1)*173)
+				}
+			}).Grow(1).Submitted() {
+				c.Toast("Opened " + files[g.file])
+			}
+		}).Grow(1)
+	})
 }
 
 func (g *gallery) drawing(c *ui.Context) {
@@ -379,7 +419,7 @@ func (g *gallery) overlays(c *ui.Context) {
 }
 
 func main() {
-	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, now: time.Now()}
+	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, now: time.Now()}
 	mygo.App.WhenReady(func() {
 		g.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    "MyGo UI Gallery",

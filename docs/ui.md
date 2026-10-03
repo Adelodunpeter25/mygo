@@ -232,6 +232,8 @@ c.SetTheme(&t)
 | `NumberInput` | edits a `*float64` within a range, typed or stepped with Up, Down and its buttons |
 | `Tabs` | a row of tabs choosing a `*int`, by click or with the arrow keys |
 | `Split`, `SplitVertical` | two panes with a divider between them that the user drags, or moves with the arrow keys, to resize them; the first's size is a `*float32` |
+| `Table` | rows under a header of `TableColumn`s, built only while in view, choosing a `*int` by click or with Up and Down; a double click or Enter reports `Submitted` |
+| `Tree`, `TreeItem` | items that open and close, built inside the items they belong to, with the arrow keys moving between them; `Clicked` and `Selected` choose one |
 | `Image` | shows a `*ui.Bitmap` |
 | `Divider`, `Spacer` | a line, and space that grows |
 | `Scroll`, `ScrollHorizontal`, `List` | scroll containers, see [layout](#layout) |

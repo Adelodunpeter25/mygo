@@ -504,7 +504,7 @@ func stateList(n platform.AccessNode, focused bool) []int32 {
 	switch n.Role {
 	case platform.RoleCheckBox, platform.RoleRadio, platform.RoleSwitch:
 		list = append(list, st.checkable)
-	case platform.RoleTab, platform.RoleTreeItem:
+	case platform.RoleTab, platform.RoleTreeItem, platform.RoleRow:
 		list = append(list, st.selectable)
 		if n.States&platform.AccessChecked != 0 {
 			list = append(list, st.selected) // not checked
@@ -524,7 +524,7 @@ func stateList(n platform.AccessNode, focused bool) []int32 {
 			list = append(list, st.singleLine)
 		}
 	}
-	if n.States&platform.AccessChecked != 0 && n.Role != platform.RoleTab && n.Role != platform.RoleTreeItem {
+	if n.States&platform.AccessChecked != 0 && n.Role != platform.RoleTab && n.Role != platform.RoleTreeItem && n.Role != platform.RoleRow {
 		list = append(list, st.checked)
 	}
 	if n.States&platform.AccessMixed != 0 || n.Now < n.Min {

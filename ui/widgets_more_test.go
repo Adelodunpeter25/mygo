@@ -152,3 +152,114 @@ func TestToast(t *testing.T) {
 		t.Error("the toast stays once its time is over")
 	}
 }
+
+func TestTable(t *testing.T) {
+	names := make([]string, 100)
+	for i := range names {
+		names[i] = "file" + string(rune('A'+i%26)) + string(rune('0'+i/26))
+	}
+	sel, opened := -1, -1
+	cols := []TableColumn{{Title: "Name"}, {Title: "Size", Width: 80, Align: End}}
+	tt := NewTester(func(c *Context) {
+		Column(c).Fill().Padding(10).Children(func() {
+			if Table(c, cols, len(names), &sel, func(row, col int) {
+				if col == 0 {
+					Text(c, names[row])
+				} else {
+					Textf(c, "%d KB", row)
+				}
+			}).Grow(1).Submitted() {
+				opened = sel
+			}
+		})
+	}, 400, 300)
+	if !tt.HasText("Name") || !tt.HasText("fileA0") || tt.HasText(names[99]) {
+		t.Fatalf("texts %q: the header and the first rows, not the last", tt.Texts())
+	}
+	if err := tt.Click("fileC0"); err != nil {
+		t.Fatal(err)
+	}
+	if sel != 2 {
+		t.Errorf("clicked the third row: selected %d", sel)
+	}
+	tt.Key(0, KeyDown)
+	tt.Key(0, KeyDown)
+	if sel != 4 {
+		t.Errorf("Down twice from the third row: %d", sel)
+	}
+	tt.Key(0, KeyEnd)
+	if sel != 99 || !tt.HasText(names[99]) {
+		t.Errorf("End: selected %d, last row shown %v", sel, tt.HasText(names[99]))
+	}
+	tt.Key(0, KeyEnter)
+	if opened != 99 {
+		t.Errorf("Enter opened %d", opened)
+	}
+	tt.Key(0, KeyHome)
+	r, _ := tt.Find("fileA0")
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	tt.ClickAt(r.X+r.W/2, r.Y+r.H/2)
+	if sel != 0 || opened != 0 {
+		t.Errorf("a double click on the first row: selected %d, opened %d", sel, opened)
+	}
+}
+
+func TestTree(t *testing.T) {
+	srcOpen, cmdOpen := false, true
+	var clicked string
+	tt := NewTester(func(c *Context) {
+		Tree(c, func() {
+			item := func(label string, open *bool, children func()) {
+				if TreeItem(c, label, open, children).Selected(clicked == label).Clicked() {
+					clicked = label
+				}
+			}
+			item("src", &srcOpen, func() {
+				item("main.go", nil, nil)
+				item("cmd", &cmdOpen, func() {
+					item("tool.go", nil, nil)
+				})
+			})
+			item("go.mod", nil, nil)
+		})
+	}, 400, 300)
+	if tt.HasText("main.go") || !tt.HasText("go.mod") {
+		t.Fatalf("a closed folder shows its items: %q", tt.Texts())
+	}
+	// Its arrow opens it.
+	r, _ := tt.Find("src")
+	tt.ClickAt(r.X-10, r.Y+r.H/2)
+	if !srcOpen || !tt.HasText("main.go") || !tt.HasText("tool.go") || clicked != "" {
+		t.Fatalf("after a click on the arrow: open %v, clicked %q, texts %q", srcOpen, clicked, tt.Texts())
+	}
+	// Nested items are indented.
+	if m, _ := tt.Find("main.go"); m.X <= r.X {
+		t.Errorf("main.go at %v, src at %v", m.X, r.X)
+	}
+	tt.Click("src")
+	if clicked != "src" {
+		t.Errorf("clicked %q", clicked)
+	}
+	// The arrows move the focus through the items in view.
+	tt.Key(0, KeyDown)
+	if !tt.Focused("main.go") {
+		t.Error("Down from src does not focus main.go")
+	}
+	tt.Key(0, KeyDown)
+	tt.Key(0, KeyLeft) // closes cmd
+	if cmdOpen || tt.HasText("tool.go") {
+		t.Errorf("Left on the open cmd leaves it open %v", cmdOpen)
+	}
+	tt.Key(0, KeyLeft) // to its parent
+	if !tt.Focused("src") {
+		t.Error("Left on the closed cmd does not focus src")
+	}
+	tt.Key(0, KeyEnter)
+	if clicked != "src" {
+		t.Errorf("Enter chose %q", clicked)
+	}
+	tt.Key(0, KeyLeft)
+	if srcOpen || tt.HasText("main.go") {
+		t.Error("Left on src does not close it")
+	}
+}

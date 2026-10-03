@@ -219,7 +219,7 @@ func (e *uiaElement) supports(i int) bool {
 	case ifaceToggle:
 		return n.Role == platform.RoleCheckBox || n.Role == platform.RoleSwitch
 	case ifaceSelectionItem:
-		return n.Role == platform.RoleRadio || n.Role == platform.RoleTab || n.Role == platform.RoleTreeItem
+		return n.Role == platform.RoleRadio || n.Role == platform.RoleTab || n.Role == platform.RoleTreeItem || n.Role == platform.RoleRow
 	case ifaceRangeValue:
 		return n.Role == platform.RoleSlider || n.Role == platform.RoleProgress
 	case ifaceValue:

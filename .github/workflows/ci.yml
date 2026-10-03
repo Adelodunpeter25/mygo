@@ -90,3 +90,34 @@ jobs:
           MYGO_E2E: 1
           MYGO_GPU: 1
         run: xvfb-run -a dbus-run-session -- go test -run 'TestContentWindow' ./internal/e2e
+
+  # Windows on ARM64, which no machine of the maintainers runs: DirectWrite's
+  # methods taking floats go through purego, which sets the floating point
+  # registers syscall leaves alone there, and Direct3D 11 draws native UI.
+  # The JavaScript packages are the same everywhere, so Bun is left out.
+  windows-arm64:
+    name: Windows ARM64
+    runs-on: windows-11-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Restore NSIS
+        id: nsis
+        uses: actions/cache/restore@v6
+        with:
+          path: ~\AppData\Local\mygo\nsis-*
+          key: nsis-${{ hashFiles('cmd/mygo/nsis.go') }}
+      - run: go test ./...
+      - name: Save NSIS
+        if: always() && steps.nsis.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ~\AppData\Local\mygo\nsis-*
+          key: ${{ steps.nsis.outputs.cache-primary-key }}
+      - name: GUI tests of native UI
+        env:
+          MYGO_E2E: 1
+        run: go test -run 'TestContentWindow' ./internal/e2e

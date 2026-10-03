@@ -592,6 +592,22 @@ func TextArea(c *Context, value *string) *Element { return textInput(c, value, t
 
 func textInput(c *Context, value *string, multiline bool) *Element {
 	t := c.theme
+	e := textInputBase(c, value, multiline)
+	e.Padding(t.space(1.5), t.space(2.5)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
+	if multiline {
+		e.MinHeight(t.space(20))
+	}
+	e.styleFn = func(e *Element) {
+		if e.Focused() {
+			e.borderC = t.Accent
+		} else if e.Hovered() {
+			e.borderC = t.Border.Mix(t.Text, 0.25)
+		}
+	}
+	return e
+}
+
+func textInputBase(c *Context, value *string, multiline bool) *Element {
 	e := c.newElement(kindInput)
 	e.flags |= flagEditable | flagFocusable | flagHover
 	e.widget = "TextInput"
@@ -624,17 +640,6 @@ func textInput(c *Context, value *string, multiline bool) *Element {
 	}
 	if !focused {
 		ed.compose = ""
-	}
-	e.Padding(t.space(1.5), t.space(2.5)).Radius(t.Radius).Background(t.Surface).Border(1, t.Border)
-	if multiline {
-		e.MinHeight(t.space(20))
-	}
-	e.styleFn = func(e *Element) {
-		if e.Focused() {
-			e.borderC = t.Accent
-		} else if e.Hovered() {
-			e.borderC = t.Border.Mix(t.Text, 0.25)
-		}
 	}
 	return e
 }

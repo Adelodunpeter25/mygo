@@ -101,9 +101,19 @@ func Button(c *Context, label string) *Element { return button(c, label, false) 
 func PrimaryButton(c *Context, label string) *Element { return button(c, label, true) }
 
 func button(c *Context, label string, primary bool) *Element {
+	b := ButtonBase(c)
+	styleButton(c, b, primary)
+	if label != "" {
+		b.Children(func() { Text(c, label).SingleLine() })
+	}
+	return b
+}
+
+// styleButton gives a button the theme's look, in the accent color when
+// primary.
+func styleButton(c *Context, b *Element, primary bool) {
 	t := c.theme
-	b := Row(c).Center().Padding(t.space(1.5), t.space(3.5)).Gap(t.space(1.5)).Radius(t.Radius).Focusable().Shrink(0)
-	b.flags |= flagClickable | flagHover
+	b.Padding(t.space(1.5), t.space(3.5)).Gap(t.space(1.5)).Radius(t.Radius)
 	base, hover, pressed, fg, border := t.Surface, t.SurfaceHover, t.SurfacePressed, t.Text, t.Border
 	if primary {
 		base, hover, pressed, fg, border = t.Accent, t.AccentHover, t.AccentPressed, t.AccentText, Color{}
@@ -122,10 +132,6 @@ func button(c *Context, label string, primary bool) *Element {
 			b.bg = hover
 		}
 	}
-	if label != "" {
-		b.Children(func() { Text(c, label).SingleLine() })
-	}
-	return b
 }
 
 // Link creates a text that opens url in the browser when clicked.
@@ -150,15 +156,8 @@ func checkPath(r Rect) *Path {
 // Checkbox creates a check box toggling *checked, with a label.
 func Checkbox(c *Context, checked *bool, label string) *Element {
 	t := c.theme
-	row := Row(c).Gap(t.space(2)).Focusable().Shrink(0)
-	row.flags |= flagClickable | flagHover | flagOwnRing
-	row.widget, row.role = "Checkbox", RoleCheckBox
-	if row.Clicked() {
-		*checked = !*checked
-		row.st.changed = true
-	}
+	row := CheckboxBase(c, checked).Gap(t.space(2)).FocusRing(false)
 	on := *checked
-	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
 		box := Box(c).Size(t.space(4), t.space(4)).Radius(t.space(1)).Shrink(0)
 		if on {
@@ -190,15 +189,8 @@ func Checkbox(c *Context, checked *bool, label string) *Element {
 // label.
 func Radio[T comparable](c *Context, selected *T, value T, label string) *Element {
 	t := c.theme
-	row := Row(c).Gap(t.space(2)).Focusable().Shrink(0)
-	row.flags |= flagClickable | flagHover | flagOwnRing
-	row.widget, row.role = "Radio", RoleRadio
-	if row.Clicked() && *selected != value {
-		*selected = value
-		row.st.changed = true
-	}
+	row := RadioBase(c, selected, value).Gap(t.space(2)).FocusRing(false)
 	on := *selected == value
-	row.checked = 1 + int8(b2f(on))
 	row.Children(func() {
 		dot := Box(c).Size(t.space(4), t.space(4)).Radius(t.space(2)).Shrink(0)
 		if on {
@@ -230,14 +222,7 @@ func Radio[T comparable](c *Context, selected *T, value T, label string) *Elemen
 // Switch creates a switch toggling *on.
 func Switch(c *Context, on *bool) *Element {
 	t := c.theme
-	sw := Box(c).Size(t.space(9), t.space(5)).Radius(t.space(2.5)).Focusable().Shrink(0)
-	sw.flags |= flagClickable | flagHover
-	sw.widget, sw.role = "Switch", RoleSwitch
-	if sw.Clicked() {
-		*on = !*on
-		sw.st.changed = true
-	}
-	sw.checked = 1 + int8(b2f(*on))
+	sw := SwitchBase(c, on).Size(t.space(9), t.space(5)).Radius(t.space(2.5))
 	pos := sw.Animate("knob", b2f(*on), 140*time.Millisecond)
 	off := t.Border.Mix(t.Text, 0.15)
 	sw.Background(off.Mix(t.Accent, pos))
@@ -254,41 +239,14 @@ func Switch(c *Context, on *bool) *Element {
 // Slider creates a slider setting *value between lo and hi.
 func Slider(c *Context, value *float64, lo, hi float64) *Element {
 	t := c.theme
-	s := Box(c).Height(t.space(5)).MinWidth(t.space(20)).Focusable()
-	s.flags |= flagDraggable | flagHover | flagOwnRing
-	s.widget = "Slider"
-	st := s.st
-	set := func(v float64) {
-		v = math.Max(lo, math.Min(hi, v))
-		if v != *value {
-			*value = v
-			st.changed = true
-			c.rt.consumed = true
-		}
-	}
+	// The knob moves across the content box, half of it inside the
+	// padding on each side.
 	knob := t.space(4)
-	if st.pressed && st.w > knob {
-		frac := (c.rt.pointerX - st.x - knob/2) / (st.w - knob)
-		set(lo + float64(max(0, min(1, frac)))*(hi-lo))
-	}
-	step := (hi - lo) / 100
-	if s.Shortcut(0, KeyLeft) || s.Shortcut(0, KeyDown) {
-		set(*value - step)
-	}
-	if s.Shortcut(0, KeyRight) || s.Shortcut(0, KeyUp) {
-		set(*value + step)
-	}
-	if s.Shortcut(0, KeyHome) {
-		set(lo)
-	}
-	if s.Shortcut(0, KeyEnd) {
-		set(hi)
-	}
+	s := SliderBase(c, value, lo, hi).Height(t.space(5)).MinWidth(t.space(20)).PaddingX(knob / 2).FocusRing(false)
 	frac := float32(0)
 	if hi > lo {
 		frac = float32((*value - lo) / (hi - lo))
 	}
-	s.role, s.hasRange, s.accRange = RoleSlider, true, [3]float64{lo, hi, *value}
 	s.Draw(func(p *Painter, r Rect) {
 		h := t.space(1)
 		track := Rect{r.X + knob/2, r.Y + r.H/2 - h/2, r.W - knob, h}
@@ -496,21 +454,12 @@ func Modal(c *Context, open *bool, fn func()) *Element {
 		return nil
 	}
 	t := c.theme
-	var panel *Element
-	Overlay(c, func() {
-		back := Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0).Background(RGBA(0, 0, 0, 0.4)).Center()
-		back.flags |= flagClickable
-		if back.Clicked() || c.Shortcut(0, KeyEscape) {
-			*open = false
-		}
-		back.Children(func() {
-			panel = Box(c).Padding(t.space(5)).Gap(t.space(3)).Radius(t.space(2.5)).Background(t.Background).MaxWidth(c.w - t.space(10)).MaxHeight(c.h - t.space(10)).Role(RoleDialog)
-			panel.Shadow(0, 10, 30, 0, RGBA(0, 0, 0, 0.3))
-			panel.flags |= flagClickable
-			panel.Children(fn)
-		})
+	return DialogBase(c, open, func(back, panel *Element) {
+		back.Background(RGBA(0, 0, 0, 0.4))
+		panel.Padding(t.space(5)).Gap(t.space(3)).Radius(t.space(2.5)).Background(t.Background).MaxWidth(c.w - t.space(10)).MaxHeight(c.h - t.space(10))
+		panel.Shadow(0, 10, 30, 0, RGBA(0, 0, 0, 0.3))
+		fn()
 	})
-	return panel
 }
 
 // Popover shows fn's elements in a panel below anchor while *open is
@@ -519,37 +468,27 @@ func Popover(c *Context, anchor *Element, open *bool, fn func()) *Element {
 	if !*open {
 		return nil
 	}
-	t := c.theme
-	b := anchor.Bounds()
-	var panel *Element
-	Overlay(c, func() {
-		back := Box(c).Absolute().Left(0).Top(0).Right(0).Bottom(0)
-		back.flags |= flagClickable
-		if back.Clicked() || c.Shortcut(0, KeyEscape) {
-			*open = false
-		}
-		gap := t.space(1)
-		panel = Box(c).Absolute().Left(b.X).Top(b.Y+b.H+gap).MinWidth(b.W).Padding(t.space(1)).Radius(t.Radius+2).
-			Background(t.Background).Border(1, t.Border).Role(RolePopup)
-		panel.Shadow(0, 6, 20, 0, RGBA(0, 0, 0, 0.18))
-		panel.flags |= flagClickable
-		panel.Children(fn)
-		keepInWindow(c, panel, b.X, b.Y+b.H+gap, b.Y-gap)
+	return PopoverBase(c, anchor, open, func(panel *Element) {
+		panel.MinWidth(anchor.Bounds().W)
+		stylePanel(c, panel)
+		fn()
 	})
-	return panel
+}
+
+// stylePanel gives the panel of a popup the theme's look.
+func stylePanel(c *Context, panel *Element) {
+	t := c.theme
+	panel.Margin(t.space(1), 0, 0, 0).Padding(t.space(1)).Radius(t.Radius+2).Background(t.Background).Border(1, t.Border)
+	panel.Shadow(0, 6, 20, 0, RGBA(0, 0, 0, 0.18))
 }
 
 // Select creates a drop-down choosing one of options into *selected.
 func Select(c *Context, selected *string, options []string) *Element {
 	t := c.theme
-	b := Button(c, "")
-	b.widget, b.role, b.accValue = "Select", RolePopUpButton, *selected
+	sel := SelectBase(c, selected)
+	b := sel.Trigger
+	styleButton(c, b, false)
 	b.Justify(SpaceBetween).MinWidth(t.space(35))
-	open := Local(b, "open", func() bool { return false })
-	if b.Clicked() {
-		*open = !*open
-	}
-	b.expanded = *open
 	b.Children(func() {
 		Text(c, *selected).SingleLine()
 		Box(c).Size(t.space(2.5), t.space(2.5)).Shrink(0).Draw(func(p *Painter, r Rect) {
@@ -558,25 +497,15 @@ func Select(c *Context, selected *string, options []string) *Element {
 			p.StrokePath(&path, 1.5, t.TextMuted)
 		})
 	})
-	Popover(c, b, open, func() {
+	sel.Popup(func(panel *Element) {
+		stylePanel(c, panel)
 		for _, opt := range options {
-			item := Row(c).Key(opt).Padding(t.space(1.5), t.space(2.5)).Radius(t.Radius)
-			item.flags |= flagClickable | flagHover
-			if opt == *selected {
+			item := sel.Item(opt).Padding(t.space(1.5), t.space(2.5)).Radius(t.Radius)
+			switch {
+			case item.Highlighted():
+				item.Background(t.Accent).TextColor(t.AccentText)
+			case opt == *selected:
 				item.Background(t.Surface)
-			}
-			if item.Clicked() {
-				if *selected != opt {
-					*selected = opt
-					b.st.changed = true
-				}
-				*open = false
-			}
-			item.styleFn = func(item *Element) {
-				if item.Hovered() {
-					item.bg = t.Accent
-					item.ts.color, item.ts.set = t.AccentText, item.ts.set|setColor
-				}
 			}
 			item.Children(func() { Text(c, opt).SingleLine() })
 		}
@@ -597,7 +526,10 @@ func keepInWindow(c *Context, e *Element, x, y, aboveY float32) {
 	if x+b.W > c.w-4 {
 		e.Left(max(4, c.w-4-b.W))
 	}
-	if y+b.H > c.h-4 && aboveY-b.H > 4 {
-		e.Top(aboveY - b.H)
+	// A top margin keeps the element apart from what it is above or
+	// below.
+	m := e.margin[0]
+	if y+m+b.H > c.h-4 && aboveY-m-b.H > 4 {
+		e.Top(aboveY - b.H - 2*m)
 	}
 }

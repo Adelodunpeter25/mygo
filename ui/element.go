@@ -196,9 +196,12 @@ type Element struct {
 	role     Role
 	checked  int8
 	expanded bool
-	accValue string
-	accRange [3]float64
-	hasRange bool
+	// highlighted is set on the option of a select the pointer or the
+	// arrows are on.
+	highlighted bool
+	accValue    string
+	accRange    [3]float64
+	hasRange    bool
 
 	// Layout results, in DIPs relative to the window.
 	x, y, w, h float32
@@ -531,6 +534,19 @@ func (e *Element) DragWindow() *Element { e.flags |= flagDragWindow; return e }
 
 // PassThrough lets the pointer reach what is under the element.
 func (e *Element) PassThrough() *Element { e.flags |= flagPassThrough; return e }
+
+// FocusRing sets whether MyGo rings the element when it has the keyboard
+// focus from the keyboard, as it does by default. Widgets that ring a part
+// of themselves instead, as a check box its box, turn it off and draw
+// their own with Painter.FocusRing while FocusVisible.
+func (e *Element) FocusRing(show bool) *Element {
+	if show {
+		e.flags &^= flagOwnRing
+	} else {
+		e.flags |= flagOwnRing
+	}
+	return e
+}
 
 // Draw paints on the element with p after its background, before its
 // children; r is its box. fn only paints: it may run more than once a

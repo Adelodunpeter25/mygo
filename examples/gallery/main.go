@@ -46,6 +46,9 @@ type gallery struct {
 	files    []string
 	now      time.Time
 	samples  []float64
+	period   int
+	pinned   bool
+	fruit    string
 }
 
 var pages = []string{"Overview", "Controls", "Text", "List", "Drawing", "Overlays"}
@@ -66,8 +69,9 @@ var (
 		"Drawing":  icon(`<path d="M15 5l4 4M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5z"/>`),
 		"Overlays": icon(`<path d="M12 3 3 8l9 5 9-5z"/><path d="m3 13 9 5 9-5"/>`),
 	}
-	starIcon  = icon(`<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>`)
-	checkIcon = icon(`<path d="M20 6 9 17l-5-5"/>`)
+	starIcon    = icon(`<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/>`)
+	checkIcon   = icon(`<path d="M20 6 9 17l-5-5"/>`)
+	chevronIcon = icon(`<path d="m6 9 6 6 6-6"/>`)
 	// A picture in its own colors: gradients, a clip path, and a dot in
 	// currentColor.
 	badge = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
@@ -267,6 +271,54 @@ func (g *gallery) controls(c *ui.Context) {
 				ui.Text(c, "Drag the divider, or focus it and press the arrows.").TextColor(t.TextMuted)
 			})
 		}).Height(140).Border(1, t.Border).Radius(t.Radius).Clip()
+	})
+	card(c, "Built on bases", func() {
+		ui.Text(c, "Bases are the widgets without their look: the pointer, the keys, the focus and accessibility, styled here anew.").TextColor(t.TextMuted)
+		ui.Row(c).Gap(16).Wrap().Children(func() {
+			// A segmented control on TabsBase.
+			tabs := ui.TabsBase(c, &g.period, 3)
+			tabs.List.Padding(3).Radius(999).Background(t.Surface).Children(func() {
+				for i, name := range []string{"Day", "Week", "Month"} {
+					seg := tabs.Tab(i).Padding(5, 14).Radius(999)
+					if i == g.period {
+						seg.Background(t.Background).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.15))
+					}
+					seg.Children(func() { ui.Text(c, name) })
+				}
+			})
+			// A pill that toggles, on SwitchBase.
+			pill := ui.SwitchBase(c, &g.pinned).Gap(6).Padding(5, 12).Radius(999).Border(1, t.Border)
+			if g.pinned {
+				pill.Background(t.Accent).TextColor(t.AccentText).Border(1, t.Accent)
+			}
+			pill.Children(func() {
+				ui.Icon(c, starIcon)
+				ui.Text(c, "Starred")
+			})
+			// A select with check marks, on SelectBase.
+			sel := ui.SelectBase(c, &g.fruit)
+			sel.Trigger.Gap(6).Padding(6, 10).Radius(8).Border(1, t.Border).Children(func() {
+				ui.Text(c, g.fruit)
+				ui.Icon(c, chevronIcon).TextColor(t.TextMuted)
+			})
+			sel.Popup(func(panel *ui.Element) {
+				panel.Margin(4, 0, 0, 0).Padding(4).Radius(10).Background(t.Background).Border(1, t.Border)
+				panel.Shadow(0, 8, 24, 0, ui.RGBA(0, 0, 0, 0.15))
+				for _, fruit := range []string{"Apple", "Banana", "Cherry", "Durian"} {
+					item := sel.Item(fruit).Gap(8).Padding(6, 10).Radius(6)
+					if item.Highlighted() {
+						item.Background(t.Accent).TextColor(t.AccentText)
+					}
+					item.Children(func() {
+						check := ui.Icon(c, checkIcon)
+						if fruit != g.fruit {
+							check.Opacity(0)
+						}
+						ui.Text(c, fruit)
+					})
+				}
+			})
+		})
 	})
 }
 
@@ -477,7 +529,7 @@ func (g *gallery) overlays(c *ui.Context) {
 }
 
 func main() {
-	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, birthday: time.Date(1815, 12, 10, 0, 0, 0, 0, time.UTC), now: time.Now()}
+	g := &gallery{page: "Overview", size: "Medium", fruit: "Apple", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, split: 160, copies: 1, tree: map[string]bool{"ui": true}, birthday: time.Date(1815, 12, 10, 0, 0, 0, 0, time.UTC), now: time.Now()}
 	mygo.App.WhenReady(func() {
 		g.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    "MyGo UI Gallery",

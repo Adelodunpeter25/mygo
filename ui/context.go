@@ -235,6 +235,9 @@ type state struct {
 	scrollX, scrollY float32
 	contentW         float32
 	contentH         float32
+	// cx and cw are the left and width of the element's content box,
+	// inside its padding, in the last frame.
+	cx, cw float32
 
 	changed, submitted bool
 	dropped            []string

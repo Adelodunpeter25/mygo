@@ -230,7 +230,9 @@ compact, 5 roomy. `FontSize` sizes their text, and `Radius` rounds their
 corners.
 
 A widget returns its element, so a call after it styles it differently
-from the rest: `ui.Button(c, "Save").Padding(10, 20).Radius(999)`.
+from the rest: `ui.Button(c, "Save").Padding(10, 20).Radius(999)`. For a
+look of your own, build on the widgets' bases, which have none: see
+[widgets without a look](#widgets-without-a-look).
 
 ## Widgets
 
@@ -255,6 +257,61 @@ from the rest: `ui.Button(c, "Save").Padding(10, 20).Radius(999)`.
 | `Divider`, `Spacer` | a line, and space that grows |
 | `Scroll`, `ScrollHorizontal`, `List` | scroll containers, see [layout](#layout) |
 | `Modal`, `Popover`, `Overlay` | dialogs and panels above the window, see [overlays](#overlays) |
+
+### Widgets without a look
+
+Every widget is built on a base, the same widget without a look: the base
+handles the pointer, the keyboard and the focus, and tells assistive
+technology what it is, and leaves every color, size and shape to the
+elements it returns, which you style as any other. Build a design of your
+own on them, as headless component libraries do on the web:
+
+| | |
+|---|---|
+| `ButtonBase` | a row that takes the focus, and reports `Clicked` for the pointer, Enter and Space |
+| `CheckboxBase`, `SwitchBase` | a row that toggles a `*bool` |
+| `RadioBase` | a row that selects its value into a `*T` |
+| `SliderBase` | sets a `*float64` from where the pointer is across its content box, inside its padding, and with the arrows, Home and End |
+| `TabsBase` | the tab `List`, whose `Tab`s choose a `*int`, with the arrows moving the choice and the focus |
+| `SelectBase` | a `Trigger` opening a `Popup` of `Item`s choosing a `*T`, which the arrows highlight (`Highlighted`) and Enter chooses |
+| `PopoverBase`, `DialogBase` | a panel below an anchor, or over a backdrop covering the window, that a click outside or Escape closes |
+| `TextInputBase`, `TextAreaBase` | text inputs without padding, background, border or corners |
+
+A segmented control on `TabsBase`, and a select on `SelectBase`:
+
+```go
+t := c.Theme()
+tabs := ui.TabsBase(c, &app.view, 3)
+tabs.List.Padding(3).Radius(999).Background(t.Surface).Children(func() {
+	for i, name := range []string{"Day", "Week", "Month"} {
+		seg := tabs.Tab(i).Padding(5, 14).Radius(999)
+		if i == app.view {
+			seg.Background(t.Background).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.15))
+		}
+		seg.Children(func() { ui.Text(c, name) })
+	}
+})
+
+sel := ui.SelectBase(c, &app.size)
+sel.Trigger.Gap(6).Padding(6, 10).Radius(8).Border(1, t.Border).Children(func() {
+	ui.Text(c, app.size)
+	ui.Icon(c, chevron)
+})
+sel.Popup(func(panel *ui.Element) {
+	panel.Margin(4, 0, 0, 0).Padding(4).Radius(10).Background(t.Background).Border(1, t.Border)
+	for _, size := range sizes {
+		item := sel.Item(size).Padding(6, 10).Radius(6)
+		if item.Highlighted() {
+			item.Background(t.Accent).TextColor(t.AccentText)
+		}
+		item.Children(func() { ui.Text(c, size) })
+	}
+})
+```
+
+Bases ring the element with the keyboard focus, as every element taking
+the focus is; `FocusRing(false)` turns the ring off for a widget that
+draws its own, with `Painter.FocusRing` while `FocusVisible`.
 
 Widgets that change a value take a pointer to it, so they need no handler:
 `ui.Checkbox(c, &app.settings.Sync, "Sync")` changes the field the moment

@@ -45,8 +45,9 @@ document.body.textContent = await Greeter.greet("Ada");
 - [Windows](windows.md): creating and arranging windows, their events, and
   what they do with their pages: navigation, downloads, permissions,
   printing.
-- [Native UI](ui.md): windows whose interface MyGo draws itself, on the
-  GPU, written in Go with package `ui` instead of a web page.
+- [Native UI](ui.md) (experimental): windows whose interface MyGo draws
+  itself, on the GPU, written in Go with package `ui` instead of a web
+  page.
 - [The application](app.md): the lifecycle, quitting, a single instance,
   deep links, file associations, starting at login and well-known
   directories.

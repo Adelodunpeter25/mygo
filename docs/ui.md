@@ -6,6 +6,9 @@ and no frontend build, and the window starts no webview, so it opens at
 once and uses little memory. MyGo draws it on the GPU, with Metal on macOS,
 Direct3D 11 on Windows and OpenGL on Linux.
 
+Native UI is experimental: the API of package `ui` may change in any
+release, without deprecations.
+
 ```go
 package main
 

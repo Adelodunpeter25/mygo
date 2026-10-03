@@ -127,6 +127,7 @@ var ct struct {
 	// Optional: tracking (macOS 10.12) and OpenType features by tag
 	// (macOS 10.13).
 	trackingName    uintptr
+	kernName        uintptr
 	featureSettings uintptr
 	featureTag      uintptr
 	featureValue    uintptr
@@ -271,6 +272,7 @@ func loadCoreText() error {
 		return 0
 	}
 	ct.trackingName = optional(text, "kCTTrackingAttributeName")
+	ct.kernName = optional(text, "kCTKernAttributeName")
 	ct.featureSettings = optional(text, "kCTFontFeatureSettingsAttribute")
 	ct.featureTag = optional(text, "kCTFontOpenTypeFeatureTag")
 	ct.featureValue = optional(text, "kCTFontOpenTypeFeatureValue")
@@ -522,8 +524,24 @@ func (e *coreText) styleSpans(attributed uintptr, style Style, spans []Span, tex
 			ct.attributedSet(styled, r, ct.trackingName, tracking)
 			ct.release(tracking)
 		}
+		if noKerning(sp.Features) && ct.kernName != 0 {
+			zero := cfFloat(0)
+			ct.attributedSet(styled, r, ct.kernName, zero)
+			ct.release(zero)
+		}
 	}
 	return styled
+}
+
+// noKerning reports whether features turn kerning off, which Core Text
+// does by a kern of 0 rather than by the feature.
+func noKerning(list string) bool {
+	for _, f := range features(list) {
+		if f.tag == [4]byte{'k', 'e', 'r', 'n'} && f.value == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // withFeatures returns a copy of font with OpenType features, owned, or 0
@@ -620,6 +638,11 @@ func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, 
 		tracking := cfFloat(float64(style.LetterSpacing))
 		defer ct.release(tracking)
 		keys, values = append(keys, ct.trackingName), append(values, tracking)
+	}
+	if noKerning(style.Features) && ct.kernName != 0 {
+		zero := cfFloat(0)
+		defer ct.release(zero)
+		keys, values = append(keys, ct.kernName), append(values, zero)
 	}
 	attrs := cfDictionary(keys, values)
 	defer ct.release(attrs)

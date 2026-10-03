@@ -437,3 +437,19 @@ func TestSpansAcrossParagraphs(t *testing.T) {
 		t.Errorf("sizes by rune %v", sizes)
 	}
 }
+
+// TestDigitFeatures picks proportional or tabular figures of the system's
+// font, where it has both.
+func TestDigitFeatures(t *testing.T) {
+	s := newSystem()
+	width := func(features string) float32 {
+		return s.Layout(Params{Text: "1111111111", Style: Style{Size: 40, Features: features}}).Width
+	}
+	tabular, proportional := width("tnum"), width("pnum")
+	if tabular == proportional {
+		t.Skip("the system's font has digits of one kind")
+	}
+	if proportional >= tabular {
+		t.Errorf("proportional ones are %v wide, tabular ones %v", proportional, tabular)
+	}
+}

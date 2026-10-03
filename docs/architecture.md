@@ -910,7 +910,7 @@ either.
   through `internal/surface.Conn`, which carries the surface and, as
   functions, what the content needs of the app (the clipboard, dragging
   the window, the appearance, the room of a hidden title bar's controls,
-  opening URLs), so `ui` imports neither
+  opening URLs, context menus), so `ui` imports neither
   `mygo` nor a backend, and an app without native UI links none of it.
   `Window.Update` and `Invalidate` coalesce redraws asked from any goroutine
   into one frame on the main thread. Page methods return `errNoPage` or do
@@ -925,6 +925,14 @@ either.
   with its position or `Key`, so focus, scroll offsets, editors and
   animations survive rebuilding. Frames happen only when asked: input,
   `Invalidate`, `After`, or `AnimationFrame` while something moves.
+- **Context menus** (`ui/menu.go`) open in two frames. A right-click or the
+  menu key marks the element, from the states of the last frame, and the
+  next frame runs its `ContextMenu` function to collect a `platform.Menu`;
+  after the frame, package mygo shows it with `Menu.popup`, posted to the
+  main loop, since native menus wait in a loop of their own. A choice
+  comes back as the item's place and label, which the next frame's run of
+  the function matches to report `Chosen`; text inputs' menus queue their
+  editing commands instead.
 - **Scenes** are flat lists of operations in device pixels: rounded
   rectangles with borders and linear gradients, shadows (blurred rounded
   rectangles), runs of glyphs, images, and pushed and popped clips.

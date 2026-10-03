@@ -197,3 +197,9 @@ func (h *windowHost) openURL(u string) {
 		h.conn.OpenURL(u)
 	}
 }
+
+func (h *windowHost) popupMenu(m *platform.Menu, x, y float32, chosen func(int)) {
+	if h.conn.PopupMenu != nil {
+		h.conn.PopupMenu(m, float64(x), float64(y), chosen)
+	}
+}

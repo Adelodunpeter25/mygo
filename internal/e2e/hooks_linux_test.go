@@ -200,3 +200,21 @@ func glSurface(w *mygo.Window) (how string, pix []byte, width, height int, suppo
 	mygo.RunOnMain(func() { how, pix, width, height = linux.TestSurfaceGL(w.NativeHandle()) })
 	return how, pix, width, height, true
 }
+
+// rightClick clicks (x, y) in a window showing native UI with the
+// secondary button, through XTEST.
+func rightClick(w *mygo.Window, x, y float64) (ok bool) {
+	mygo.RunOnMain(func() { ok = linux.TestRightClickSurface(w.NativeHandle(), x, y) })
+	return ok
+}
+
+// popupMenus returns the labels of the items of the context menus shown.
+func popupMenus() (menus [][]string, supported bool) {
+	mygo.RunOnMain(func() { menus = linux.TestPopups() })
+	return menus, true
+}
+
+func choosePopupItem(label string) (ok bool) {
+	mygo.RunOnMain(func() { ok = linux.TestChoosePopupItem(label) })
+	return ok
+}

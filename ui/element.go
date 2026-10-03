@@ -81,6 +81,7 @@ const (
 	flagHover
 	flagOwnRing
 	flagDropTarget
+	flagContextMenu
 )
 
 type shadow struct {

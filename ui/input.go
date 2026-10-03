@@ -163,6 +163,9 @@ func (rt *engine) pointerDown(x, y float32, button int, mods Modifiers) {
 	if button == 0 && rt.scrollbarPress(chain, x, y) {
 		return
 	}
+	if button == 1 && rt.menuPress(chain, x, y) {
+		return
+	}
 	var target, focus *state
 	for _, id := range chain {
 		s := rt.states[id]
@@ -223,6 +226,9 @@ func (rt *engine) pointerUp(button int) {
 	if rt.scrollDrag.st != nil {
 		rt.scrollDrag.st = nil
 		rt.requestFrame()
+		return
+	}
+	if button == 1 && rt.menuRelease() {
 		return
 	}
 	s := rt.pressed
@@ -365,6 +371,9 @@ func (rt *engine) claimed(k keyEvent) bool {
 
 func (rt *engine) keyDown(mods Modifiers, key Key) {
 	k := keyEvent{mods, key}
+	if (key == KeyContextMenu && mods == 0 || key == KeyF10 && mods == Shift) && !rt.claimed(k) && rt.menuKey() {
+		return
+	}
 	if s := rt.states[rt.focused]; s != nil && s.editor != nil && s.flags&flagEditable != 0 && s.editor.wants(k) {
 		s.editor.queue = append(s.editor.queue, editEvent{kind: editKey, mods: mods, key: key})
 		rt.blinkStart = time.Now()

@@ -27,6 +27,9 @@ type host interface {
 	// invalidate asks for a frame from any goroutine.
 	invalidate()
 	openURL(string)
+	// popupMenu shows a context menu at (x, y) after the event being
+	// handled; chosen receives the ID of the item chosen.
+	popupMenu(m *platform.Menu, x, y float32, chosen func(id int))
 }
 
 // engine runs the user interface of one window: it builds frames with
@@ -60,6 +63,7 @@ type engine struct {
 	focusVisible       bool
 	windowFocused      bool
 	keys               []keyEvent
+	menu               menuState
 
 	consumed  bool
 	animating bool
@@ -171,6 +175,7 @@ func (rt *engine) runFrame() {
 		if ov := rt.c.overlay; ov != nil {
 			rt.c.root.add(ov)
 		}
+		rt.resolveMenu()
 		rt.endPass()
 		if !rt.consumed {
 			break
@@ -199,6 +204,7 @@ func (rt *engine) runFrame() {
 		rt.host.requestFrame()
 	}
 	rt.armTimer()
+	rt.showMenu()
 }
 
 // endPass forgets the input the pass handled.
@@ -212,6 +218,7 @@ func (rt *engine) endPass() {
 		s.changed, s.submitted = false, false
 		s.dropped = nil
 	}
+	rt.menu.chosen = 0
 	rt.delivered = rt.delivered[:0]
 }
 

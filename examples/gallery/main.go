@@ -1,7 +1,7 @@
 // Gallery tours MyGo's own user interface toolkit: a window drawn on the
 // GPU from Go, without a web page. It shows layout, the widgets, text
-// editing, a list of ten thousand rows, custom drawing, overlays, file
-// drops and updates from other goroutines.
+// editing, a list of ten thousand rows with context menus, custom drawing,
+// overlays, file drops and updates from other goroutines.
 //
 //	go run ./examples/gallery
 package main
@@ -33,6 +33,7 @@ type gallery struct {
 	bio     string
 	filter  string
 	picked  int
+	starred map[int]bool
 	dialog  bool
 	menu    bool
 	files   []string
@@ -240,7 +241,7 @@ func (g *gallery) list(c *ui.Context) {
 			rows = append(rows, i)
 		}
 	}
-	ui.Textf(c, "%d rows; only those in view are built.", len(rows)).TextColor(t.TextMuted)
+	ui.Textf(c, "%d rows; only those in view are built. Right-click one for its menu.", len(rows)).TextColor(t.TextMuted)
 	ui.List(c, len(rows), 32, func(i int) {
 		n := rows[i]
 		row := ui.Row(c).Fill().PaddingX(12).Gap(10).Radius(6)
@@ -253,8 +254,24 @@ func (g *gallery) list(c *ui.Context) {
 		if row.Clicked() {
 			g.picked = n
 		}
+		row.ContextMenu(func(m *ui.Menu) {
+			if m.Item("Pick").Chosen() {
+				g.picked = n
+			}
+			if m.Item("Starred").Checked(g.starred[n]).Chosen() {
+				g.starred[n] = !g.starred[n]
+			}
+			m.Separator()
+			if m.Item("Copy Square").Chosen() {
+				mygo.Clipboard.WriteText(fmt.Sprint(n * n))
+			}
+		})
 		row.Children(func() {
-			ui.Textf(c, "Row %d", n).Grow(1)
+			label := fmt.Sprintf("Row %d", n)
+			if g.starred[n] {
+				label += "  ★"
+			}
+			ui.Text(c, label).Grow(1)
 			ui.Textf(c, "%d²  =  %d", n, n*n).Font("monospace").FontSize(12)
 		})
 	}).Height(420).Border(1, t.Border).Radius(8).Padding(4)
@@ -332,7 +349,7 @@ func (g *gallery) overlays(c *ui.Context) {
 }
 
 func main() {
-	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, now: time.Now()}
+	g := &gallery{page: "Overview", size: "Medium", plan: "Pro", volume: 35, picked: -1, starred: map[int]bool{}, now: time.Now()}
 	mygo.App.WhenReady(func() {
 		g.win = mygo.NewWindow(mygo.WindowOptions{
 			Title:    "MyGo UI Gallery",

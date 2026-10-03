@@ -115,6 +115,9 @@ type surface struct {
 	textInput bool
 	caret     platform.RectF
 	input     platform.TextInputState
+	// lastKey is a copy of the last key press, which a context menu the
+	// key opens shows for.
+	lastKey ptr
 }
 
 // GDK event masks of the drawing area.
@@ -188,6 +191,24 @@ func (s *surface) destroy() {
 	gtkIMContextSetClientWindow(s.im, 0)
 	gObjectUnref(s.im)
 	s.im = 0
+	if s.lastKey != 0 {
+		gdkEventFree(s.lastKey)
+		s.lastKey = 0
+	}
+}
+
+// popupTrigger returns the last press of a button or, in a surface, of a
+// key in the window's content: the event a context menu shows for, whose
+// time and serial GTK grabs the pointer with.
+func (w *window) popupTrigger() ptr {
+	ev := w.press.event
+	if s := w.surface; s != nil && s.lastKey != 0 {
+		// GdkEventButton and GdkEventKey: time 20.
+		if ev == 0 || field[uint32](s.lastKey, 20)-field[uint32](ev, 20) < 1<<31 {
+			ev = s.lastKey
+		}
+	}
+	return ev
 }
 
 // Surface returns the surface of a window created with
@@ -470,12 +491,17 @@ func initSurfaceCallbacks() {
 		if s == nil {
 			return false
 		}
-		if s.textInput && gtkIMContextFilterKeypress(s.im, event) {
-			return true
-		}
 		kind := platform.KeyPressed
 		if field[int32](event, 0) == 9 { // GDK_KEY_RELEASE
 			kind = platform.KeyReleased
+		} else {
+			if s.lastKey != 0 {
+				gdkEventFree(s.lastKey)
+			}
+			s.lastKey = gdkEventCopy(event)
+		}
+		if s.textInput && gtkIMContextFilterKeypress(s.im, event) {
+			return true
 		}
 		k := keyvalKey(field[uint32](event, 28))
 		if k == platform.KeyUnknown {

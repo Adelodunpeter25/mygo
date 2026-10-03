@@ -286,6 +286,39 @@ func Disclosure(c *ui.Context, title string, body func()) {
   	zone.Border(2, t.Accent)
   }
   ```
+- **Context menus.** `ContextMenu` gives an element a menu of the system's,
+  which opens where the element is right-clicked (Control-clicked on
+  macOS), and below it when the menu key or Shift+F10 is pressed while it
+  or one inside it has the focus. The function builds the items when the
+  menu opens, and runs again in the frame after one was chosen, where its
+  `Chosen` reports it:
+
+  ```go
+  row.ContextMenu(func(m *ui.Menu) {
+  	if m.Item("Rename").Shortcut(0, ui.KeyF2).Chosen() {
+  		app.renaming = i
+  	}
+  	if m.Item("Pinned").Checked(note.pinned).Chosen() {
+  		note.pinned = !note.pinned
+  	}
+  	m.Submenu("Move to", func(m *ui.Menu) {
+  		for _, f := range app.folders {
+  			if m.Item(f.name).Chosen() {
+  				app.move(i, f)
+  			}
+  		}
+  	})
+  	m.Separator()
+  	if m.Item("Delete").Disabled(note.locked).Chosen() {
+  		app.delete(i)
+  	}
+  })
+  ```
+
+  The innermost element with a menu gets the click. Text inputs have the
+  editing commands of their platform's text fields, unless `ContextMenu`
+  gives them another menu. `Shortcut` only shows a key: handle it with
+  `Shortcut` on the context or an element.
 - **Tooltips.** `Tooltip("…")` shows a tip once the pointer rests on the
   element.
 - **Custom title bars.** In a `Frameless` window, `DragWindow` makes an
@@ -464,8 +497,10 @@ func TestCounter(t *testing.T) {
 }
 ```
 
-`tt.Image()` is the last frame, for snapshots, and `ui.Render` draws a view
-once at a given scale.
+`tt.RightClick` opens a context menu, which `tt.Menu` lists and
+`tt.ChooseMenuItem("Move to", "Archive")` chooses from. `tt.Image()` is the
+last frame, for snapshots, and `ui.Render` draws a view once at a given
+scale.
 
 ## Rendering
 

@@ -22,6 +22,9 @@ type headless struct {
 	opened      []string
 	bar         TitleBar
 	access      *platform.AccessTree
+	// menu is the context menu shown, and chosen takes its choice.
+	menu   *platform.Menu
+	chosen func(id int)
 }
 
 func (h *headless) size() (float32, float32, float32) { return h.w, h.h, h.scale }
@@ -40,6 +43,9 @@ func (h *headless) isDark() bool                               { return h.dark }
 func (h *headless) titleBar() TitleBar                         { return h.bar }
 func (h *headless) invalidate()                                { h.requested = true }
 func (h *headless) openURL(u string)                           { h.opened = append(h.opened, u) }
+func (h *headless) popupMenu(m *platform.Menu, x, y float32, chosen func(int)) {
+	h.menu, h.chosen = m, chosen
+}
 func (h *headless) image() *image.RGBA {
 	m := &h.img.Image
 	return &image.RGBA{Pix: m.RGBA(), Stride: 4 * m.W, Rect: image.Rect(0, 0, m.W, m.H)}
@@ -162,6 +168,84 @@ func (t *Tester) ClickAt(x, y float32) {
 	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y)})
 	t.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: float64(x), Y: float64(y)})
 }
+
+// RightClick clicks the center of the element showing text or labeled s
+// with the secondary button.
+func (t *Tester) RightClick(s string) error {
+	r, ok := t.Find(s)
+	if !ok {
+		return fmt.Errorf("ui: no element shows %q", s)
+	}
+	t.RightClickAt(r.X+r.W/2, r.Y+r.H/2)
+	return nil
+}
+
+// RightClickAt clicks at (x, y), in DIPs, with the secondary button.
+func (t *Tester) RightClickAt(x, y float32) {
+	t.send(platform.SurfaceEvent{Kind: platform.PointerDown, X: float64(x), Y: float64(y), Button: 1})
+	t.send(platform.SurfaceEvent{Kind: platform.PointerUp, X: float64(x), Y: float64(y), Button: 1})
+}
+
+// Menu returns the labels of the items of the context menu shown, "-" for
+// separators, or nil when none is.
+func (t *Tester) Menu() []string {
+	if t.h.menu == nil {
+		return nil
+	}
+	out := []string{}
+	for _, it := range t.h.menu.Items {
+		label := it.Label
+		if it.Type == platform.MenuItemSeparator {
+			label = "-"
+		}
+		out = append(out, label)
+	}
+	return out
+}
+
+// ChooseMenuItem chooses the item of the context menu shown labeled with
+// the last of path, in the submenus the others label, and closes the menu.
+func (t *Tester) ChooseMenuItem(path ...string) error {
+	m := t.h.menu
+	if m == nil {
+		return fmt.Errorf("ui: no context menu is shown")
+	}
+	if len(path) == 0 {
+		return fmt.Errorf("ui: no item to choose")
+	}
+	var found *platform.MenuItem
+	for i, label := range path {
+		found = nil
+		for _, it := range m.Items {
+			if it.Label == label && it.Type != platform.MenuItemSeparator {
+				found = it
+				break
+			}
+		}
+		switch {
+		case found == nil:
+			return fmt.Errorf("ui: the context menu has no item %q", strings.Join(path[:i+1], " > "))
+		case !found.Enabled:
+			return fmt.Errorf("ui: the item %q is disabled", strings.Join(path[:i+1], " > "))
+		case i < len(path)-1:
+			if found.Submenu == nil {
+				return fmt.Errorf("ui: the item %q has no submenu", strings.Join(path[:i+1], " > "))
+			}
+			m = found.Submenu
+		}
+	}
+	if found.Type == platform.MenuItemSubmenu {
+		return fmt.Errorf("ui: %q opens a submenu", strings.Join(path, " > "))
+	}
+	chosen := t.h.chosen
+	t.h.menu, t.h.chosen = nil, nil
+	chosen(found.ID)
+	t.settle()
+	return nil
+}
+
+// CloseMenu closes the context menu shown without choosing an item.
+func (t *Tester) CloseMenu() { t.h.menu, t.h.chosen = nil, nil }
 
 // Press presses (x, y) without releasing; Release releases it.
 func (t *Tester) Press(x, y float32) {

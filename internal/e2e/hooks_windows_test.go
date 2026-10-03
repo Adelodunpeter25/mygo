@@ -170,3 +170,22 @@ func compose(*mygo.Window, string, int, bool) bool             { return false }
 
 // Only Linux draws native UI in a GtkGLArea.
 func glSurface(*mygo.Window) (string, []byte, int, int, bool) { return "", nil, 0, 0, false }
+
+// rightClick clicks (x, y) in a window showing native UI with the
+// secondary button, with the messages a mouse sends.
+func rightClick(w *mygo.Window, x, y float64) (ok bool) {
+	mygo.RunOnMain(func() { ok = win.TestRightClickSurface(w.NativeHandle(), x, y) })
+	return ok
+}
+
+// popupMenus returns the labels of the items of the context menus shown.
+// The modal loop of a menu runs the main thread's work.
+func popupMenus() (menus [][]string, supported bool) {
+	mygo.RunOnMain(func() { menus = win.TestPopups() })
+	return menus, true
+}
+
+func choosePopupItem(label string) (ok bool) {
+	mygo.RunOnMain(func() { ok = win.TestChoosePopupItem(label) })
+	return ok
+}

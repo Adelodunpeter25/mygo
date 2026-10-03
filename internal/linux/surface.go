@@ -402,7 +402,7 @@ func initSurfaceCallbacks() {
 		if s == nil {
 			return false
 		}
-		s.rendering, s.rendered = true, true
+		s.rendering, s.rendered, s.inMemory = true, true, false
 		s.send(platform.SurfaceEvent{Kind: platform.SurfaceFrame})
 		s.rendering = false
 		return true

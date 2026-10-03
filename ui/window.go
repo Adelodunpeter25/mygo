@@ -3,6 +3,7 @@ package ui
 import (
 	"log"
 	"os"
+	"time"
 
 	"github.com/egoist/mygo/internal/platform"
 	"github.com/egoist/mygo/internal/raster"
@@ -52,15 +53,28 @@ func (v *Content) AttachContent(conn *surface.Conn) {
 // windowHost presents frames on a window's surface, with a GPU renderer
 // when the platform has one and in memory otherwise.
 type windowHost struct {
-	conn     *surface.Conn
-	rt       *engine
-	gpu      gpuRenderer
+	conn *surface.Conn
+	rt   *engine
+	gpu  gpuRenderer
+	// gpuTried tells that the first frame tried the GPU, onGPU that its
+	// renderer drew on a GPU, degraded that one drawing in software took
+	// its place, and gpuSince when the renderer was made. After a failure,
+	// retryAt is when a frame makes another, and backoff how long the next
+	// failure waits.
 	gpuTried bool
+	onGPU    bool
+	degraded bool
+	gpuSince time.Time
+	retryAt  time.Time
+	backoff  time.Duration
 	soft     raster.Renderer
 	last     *scene.Scene
 	// framing tells that the surface asked for the frame being drawn.
 	framing bool
 }
+
+// newGPU makes the GPU renderer of a surface; tests replace it.
+var newGPU = newGPURenderer
 
 // event handles an event of the surface, noting when it asks for a frame:
 // only then may renderers draw (OpenGL's context is current only then).
@@ -97,29 +111,101 @@ func (h *windowHost) present(s *scene.Scene) {
 		h.conn.Surface.RequestFrame()
 		return
 	}
-	if !h.gpuTried {
-		h.gpuTried = true
-		if n := h.conn.Surface.Native(); os.Getenv("MYGO_GPU") != "0" && n != (platform.SurfaceNative{}) {
-			r, err := newGPURenderer(n)
-			if err != nil {
-				log.Printf("mygo: drawing without the GPU: %v", err)
-			} else {
-				h.gpu = r
-			}
-		}
+	due := !h.retryAt.IsZero() && !time.Now().Before(h.retryAt)
+	switch {
+	case !h.gpuTried || h.gpu == nil && due:
+		h.makeGPU()
+	case due && h.degraded:
+		// Drawing in software since the GPU went away: is it back?
+		h.gpu.Release()
+		h.gpu = nil
+		h.makeGPU()
 	}
-	if h.gpu != nil {
-		if err := h.gpu.Render(s); err == nil {
-			return
-		} else {
-			log.Printf("mygo: drawing without the GPU: %v", err)
-			h.gpu.Release()
-			h.gpu = nil
-		}
+	if h.render(s) {
+		return
 	}
 	h.soft.Render(s)
 	m := &h.soft.Image
 	h.conn.Surface.PresentPixels(m.Pix, m.Stride, m.W, m.H)
+}
+
+// render draws s with the GPU renderer and reports whether it did. One
+// that fails gives way to another made at once, in case the GPU is back
+// already, or another, or Windows' software rasterizer, can draw; when
+// that fails too, frames are drawn in memory until a later try.
+func (h *windowHost) render(s *scene.Scene) bool {
+	for try := 0; h.gpu != nil; try++ {
+		err := h.gpu.Render(s)
+		if err == nil {
+			return true
+		}
+		log.Printf("mygo: drawing without the GPU: %v", err)
+		h.gpu.Release()
+		h.gpu = nil
+		if try > 0 {
+			h.retryLater()
+			return false
+		}
+		if time.Since(h.gpuSince) > time.Minute {
+			h.backoff = 0 // it worked for a while: the waits start over
+		}
+		h.makeGPU()
+	}
+	return false
+}
+
+// makeGPU makes the surface's GPU renderer: for the first frame, after one
+// failed, and when the wait after a failure is over. Where the first frame
+// cannot have one, the window draws in memory for good, and where it has a
+// GPU, a renderer that draws in software in its place tries for the GPU
+// again from time to time.
+func (h *windowHost) makeGPU() {
+	retry := h.gpuTried
+	h.gpuTried, h.retryAt = true, time.Time{}
+	n := h.conn.Surface.Native()
+	if os.Getenv("MYGO_GPU") == "0" || n == (platform.SurfaceNative{}) {
+		return
+	}
+	r, err := newGPU(n)
+	switch {
+	case err != nil:
+		log.Printf("mygo: drawing without the GPU: %v", err)
+		if retry {
+			h.retryLater()
+		}
+		return
+	case r == nil:
+		return
+	case !retry:
+		h.onGPU = !software(r)
+	case h.onGPU && software(r):
+		if !h.degraded {
+			log.Print("mygo: drawing in software until the GPU is back")
+		}
+		h.degraded = true
+		h.retryLater()
+	default:
+		if !software(r) {
+			log.Print("mygo: drawing with the GPU again")
+		}
+		h.degraded = false
+	}
+	h.gpu, h.gpuSince = r, time.Now()
+}
+
+// software reports whether a renderer draws on the CPU, as Direct3D's WARP.
+func software(r gpuRenderer) bool {
+	s, ok := r.(interface{ Software() bool })
+	return ok && s.Software()
+}
+
+// retryLater has a frame make a GPU renderer again after a wait, which
+// doubles with each failure up to half a minute: a driver that resets, a
+// GPU unplugged or a machine waking up may take a while. A window that
+// draws nothing meanwhile is not woken for it.
+func (h *windowHost) retryLater() {
+	h.backoff = min(max(2*h.backoff, time.Second), 30*time.Second)
+	h.retryAt = time.Now().Add(h.backoff)
 }
 
 // capture renders the last frame in memory.

@@ -230,6 +230,7 @@ type Renderer struct {
 	swapChain uintptr
 	rtv       uintptr
 	w, h      int
+	warp      bool // the device is WARP, Windows' software rasterizer
 
 	vs, ps, layout      uintptr
 	blend, raster, samp uintptr
@@ -257,12 +258,14 @@ func New(hwnd uintptr) (*Renderer, error) {
 	levels := []uint32{0xb000, 0xa100, 0xa000} // 11_0, 10_1, 10_0
 	const bgraSupport = 0x20
 	var hr uintptr
-	for _, driver := range []uintptr{1, 5} { // hardware, then WARP
+	const hardware, warp = 1, 5
+	for _, driver := range []uintptr{hardware, warp} {
 		var level uint32
 		hr, _, _ = procD3D11CreateDevice.Call(0, driver, 0, bgraSupport,
 			uintptr(unsafe.Pointer(&levels[0])), uintptr(len(levels)), 7,
 			uintptr(unsafe.Pointer(&r.device)), uintptr(unsafe.Pointer(&level)), uintptr(unsafe.Pointer(&r.ctx)))
 		if !failed(hr) {
+			r.warp = driver == warp
 			break
 		}
 	}
@@ -359,6 +362,10 @@ func (r *Renderer) resize(w, h int) error {
 	r.w, r.h = w, h
 	return nil
 }
+
+// Software reports whether the renderer draws with WARP, on the CPU, for
+// want of a GPU.
+func (r *Renderer) Software() bool { return r.warp }
 
 // Release frees the renderer's GPU objects.
 func (r *Renderer) Release() {

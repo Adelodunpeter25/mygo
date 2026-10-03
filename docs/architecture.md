@@ -1005,6 +1005,16 @@ either.
   the one a window falls back to when its GPU renderer fails. Frames that
   are not the surface's (a capture before the first frame) are kept, not
   drawn: OpenGL's context is current only in the surface's.
+
+  A GPU renderer that fails (a driver reset, a GPU unplugged, sleep) is
+  released and another made in the same frame (`ui/window.go`): the GPU
+  may be back already, and on Windows WARP stands in, presenting through a
+  swap chain, as GDI cannot show frames once a flip-model swap chain has
+  drawn into a window. Without one, frames are drawn in memory, and a
+  frame tries again after a wait that doubles from one second to half a
+  minute; a renderer drawing in software in place of a GPU the window had
+  tries for it the same way. A window without a GPU at its first frame
+  draws in memory for good.
 - **Tests.** `ui.Tester` runs views against a host in memory
   (`ui/headless.go`) with the CPU renderer; the fake backend's surface lets
   the core's tests drive content windows through `package mygo`.

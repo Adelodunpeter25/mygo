@@ -8,6 +8,7 @@ import (
 	"testing"
 	"unsafe"
 
+	"github.com/egoist/mygo/internal/gpu"
 	"github.com/egoist/mygo/internal/gpu/gputest"
 )
 
@@ -54,21 +55,46 @@ func (r *Renderer) readBack(t *testing.T) ([]byte, int) {
 func TestDrawsAsTheCPURenderer(t *testing.T) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	s := gputest.Scene()
-	r, err := New(hiddenWindow(t, s.Width, s.Height))
-	if err != nil {
-		t.Skip("no Direct3D 11:", err)
+	// With the shaders compiled ahead of time, and with those compiled
+	// from shader.hlsl when the renderer starts, as when they are older.
+	for _, compile := range []bool{false, true} {
+		compileShaders = compile
+		s := gputest.Scene()
+		r, err := New(hiddenWindow(t, s.Width, s.Height))
+		compileShaders = false
+		if err != nil {
+			t.Skip("no Direct3D 11:", err)
+		}
+		// Twice: the second frame updates what the first uploaded.
+		for frame := range 2 {
+			if err := r.draw(s); err != nil {
+				t.Fatal(err)
+			}
+			pix, stride := r.readBack(t)
+			gputest.Compare(t, "d3d11", pix, stride, s)
+			if err := r.present(); err != nil {
+				t.Fatalf("frame %d: %v", frame, err)
+			}
+		}
+		r.Release()
 	}
-	defer r.Release()
-	// Twice: the second frame updates what the first uploaded.
-	for frame := range 2 {
-		if err := r.draw(s); err != nil {
+}
+
+// TestShaderBytecode checks that the shaders compiled ahead of time come
+// from shader.hlsl as it is, and that the compiler renderers fall back to
+// compiles it.
+func TestShaderBytecode(t *testing.T) {
+	if gpu.SourceSum(shaderSource) != shaderSum {
+		t.Fatal("shader.hlsl changed since shaders.go was generated: run go generate ./internal/gpu/d3d11 on Windows")
+	}
+	for _, s := range []struct{ entry, target string }{{"vs", "vs_4_0"}, {"ps", "ps_4_0"}} {
+		code, err := compileShader(s.entry, s.target)
+		if err != nil {
 			t.Fatal(err)
 		}
-		pix, stride := r.readBack(t)
-		gputest.Compare(t, "d3d11", pix, stride, s)
-		if err := r.present(); err != nil {
-			t.Fatalf("frame %d: %v", frame, err)
+		// DXBC starts with its magic.
+		if len(code) < 4 || string(code[:4]) != "DXBC" {
+			t.Errorf("%s: not DXBC", s.entry)
 		}
 	}
 }

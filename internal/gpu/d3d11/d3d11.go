@@ -3,8 +3,9 @@
 // Package d3d11 draws scenes with Direct3D 11 into a window through a DXGI
 // flip model swap chain, called through syscall like the rest of the
 // Windows backend (no cgo). Every op of a scene is an instanced quad drawn
-// by one precompiled shader (shader.hlsl); clips are scissor rectangles,
-// with the innermost rounded clip computed in the shader.
+// by one shader (shader.hlsl, compiled ahead of time into shaders.go);
+// clips are scissor rectangles, with the innermost rounded clip computed
+// in the shader.
 package d3d11
 
 //go:generate go run gen.go
@@ -294,10 +295,14 @@ func (r *Renderer) init() error {
 		return errors.New("d3d11: DXGI 1.2 is required")
 	}
 
-	if failed(call(r.device, devCreateVertexShader, uintptr(unsafe.Pointer(&vertexShader[0])), uintptr(len(vertexShader)), 0, uintptr(unsafe.Pointer(&r.vs)))) {
+	vsCode, psCode, err := shaderCode()
+	if err != nil {
+		return err
+	}
+	if failed(call(r.device, devCreateVertexShader, uintptr(unsafe.Pointer(&vsCode[0])), uintptr(len(vsCode)), 0, uintptr(unsafe.Pointer(&r.vs)))) {
 		return errors.New("d3d11: cannot create the vertex shader")
 	}
-	if failed(call(r.device, devCreatePixelShader, uintptr(unsafe.Pointer(&pixelShader[0])), uintptr(len(pixelShader)), 0, uintptr(unsafe.Pointer(&r.ps)))) {
+	if failed(call(r.device, devCreatePixelShader, uintptr(unsafe.Pointer(&psCode[0])), uintptr(len(psCode)), 0, uintptr(unsafe.Pointer(&r.ps)))) {
 		return errors.New("d3d11: cannot create the pixel shader")
 	}
 	names := []string{"RECT", "RADII", "INNER", "COLOR", "COLOR", "COLOR", "GRAD", "UV", "CLIP", "CLIPR", "PARAMS"}
@@ -310,7 +315,7 @@ func (r *Renderer) init() error {
 			AlignedByteOffset: uint32(16 * i), InputSlotClass: 1, InstanceDataStepRate: 1}
 	}
 	if failed(call(r.device, devCreateInputLayout, uintptr(unsafe.Pointer(&elems[0])), uintptr(len(elems)),
-		uintptr(unsafe.Pointer(&vertexShader[0])), uintptr(len(vertexShader)), uintptr(unsafe.Pointer(&r.layout)))) {
+		uintptr(unsafe.Pointer(&vsCode[0])), uintptr(len(vsCode)), uintptr(unsafe.Pointer(&r.layout)))) {
 		return errors.New("d3d11: cannot create the input layout")
 	}
 

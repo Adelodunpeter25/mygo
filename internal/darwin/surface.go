@@ -74,14 +74,17 @@ type surface struct {
 	view     id
 	tracking id
 	link     id // CADisplayLink (macOS 14), nil before
-	// Without a display link, a timer paces frames at the display's
-	// rate: timing is true while one is due, and lastFrame is when the
-	// last frame began.
-	timing    bool
-	lastFrame time.Time
-	cursor    platform.Cursor
-	inside    bool
-	ctrlClick bool // the primary button is down for a Control-click
+	// The display link runs while frames follow each other (linkRunning),
+	// and due is whether its next tick draws one. Without a display link,
+	// a timer paces frames at the display's rate: timing is true while
+	// one is due. lastFrame is when the last frame began.
+	linkRunning bool
+	due         bool
+	timing      bool
+	lastFrame   time.Time
+	cursor      platform.Cursor
+	inside      bool
+	ctrlClick   bool // the primary button is down for a Control-click
 
 	// input is the state of the text input with the keyboard; marked is
 	// the input method's composition and markedSel its selection in it.
@@ -166,19 +169,30 @@ func (s *surface) RequestFrame() {
 		return
 	}
 	if s.link != 0 {
-		// The next display refresh draws, as a page's would.
-		send(s.link, "setPaused:", 0)
+		switch {
+		case s.linkRunning:
+			s.due = true
+		case time.Since(s.lastFrame) > 2*s.refresh() && s.visible():
+			// After a pause, the frame draws at once, at the end of this
+			// pass of the run loop, as AppKit's views do. A window out of
+			// sight waits for the link, which ticks once it shows: AppKit
+			// draws the views of hidden windows too.
+			send(s.view, "setNeedsDisplay:", 1)
+		default:
+			// Frames that follow each other draw at the display's
+			// refreshes; the link keeps running while they come, rather
+			// than pausing after each, which costs a call to the window
+			// server.
+			s.due, s.linkRunning = true, true
+			send(s.link, "setPaused:", 0)
+		}
 		return
 	}
 	if s.timing {
 		return
 	}
 	// One refresh after the last frame, or at once after a pause.
-	fps := 60
-	if screen := send(s.w.win, "screen"); screen != 0 && respondsTo(screen, "maximumFramesPerSecond") {
-		fps = max(sendInt(screen, "maximumFramesPerSecond"), 30)
-	}
-	delay := time.Second/time.Duration(fps) - time.Since(s.lastFrame)
+	delay := s.refresh() - time.Since(s.lastFrame)
 	if delay <= 0 {
 		send(s.view, "setNeedsDisplay:", 1)
 		return
@@ -188,6 +202,21 @@ func (s *surface) RequestFrame() {
 		t := msgTimer(class("NSTimer"), sel("timerWithTimeInterval:target:selector:userInfo:repeats:"), delay.Seconds(), s.view, sel("mygoTimer:"), 0, false)
 		send(send(class("NSRunLoop"), "mainRunLoop"), "addTimer:forMode:", uintptr(t), kCFRunLoopCommonModes)
 	})
+}
+
+// visible reports whether some of the window shows on screen.
+func (s *surface) visible() bool {
+	const occlusionStateVisible = 1 << 1
+	return sendInt(s.w.win, "occlusionState")&occlusionStateVisible != 0
+}
+
+// refresh returns the time between two refreshes of the window's display.
+func (s *surface) refresh() time.Duration {
+	fps := 60
+	if screen := send(s.w.win, "screen"); screen != 0 && respondsTo(screen, "maximumFramesPerSecond") {
+		fps = max(sendInt(screen, "maximumFramesPerSecond"), 30)
+	}
+	return time.Second / time.Duration(fps)
 }
 
 func (s *surface) PresentPixels(pix []byte, stride, width, height int) {
@@ -457,7 +486,16 @@ func registerSurfaceClass() {
 			}
 		}),
 		method("mygoTick:", func(self id, _ objc.SEL, link id) {
-			send(link, "setPaused:", 1)
+			s := b().surfaceOf(self)
+			if s == nil || !s.due {
+				// No frame was asked for since the last refresh.
+				send(link, "setPaused:", 1)
+				if s != nil {
+					s.linkRunning = false
+				}
+				return
+			}
+			s.due = false
 			send(self, "setNeedsDisplay:", 1)
 		}),
 		method("mygoTimer:", func(self id, _ objc.SEL, timer id) {

@@ -3,18 +3,23 @@
 // Package metal draws scenes with Metal into a CAMetalLayer, called through
 // the Objective-C runtime with purego like the rest of the macOS backend
 // (no cgo). Every op of a scene is an instanced quad drawn by one shader
-// (shader.metal, compiled when the renderer starts), from the instances
-// package gpu builds; clips are scissor rectangles, with the innermost
-// rounded clip computed in the shader, as in package d3d11.
+// (shader.metal, compiled ahead of time into shaderlib.go), from the
+// instances package gpu builds; clips are scissor rectangles, with the
+// innermost rounded clip computed in the shader, as in package d3d11.
 package metal
 
+//go:generate go run gen.go
+
 import (
+	"crypto/sha256"
 	_ "embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
 	"runtime"
 	"sync"
+	"time"
 	"unsafe"
 
 	"github.com/ebitengine/purego"
@@ -76,7 +81,30 @@ var (
 	msgSetFloat       func(obj id, sel objc.SEL, v float64)
 	selMu             sync.Mutex
 	selectors         = map[string]objc.SEL{}
+
+	dispatchDataCreate, dispatchRelease uintptr
+
+	// Timers that trim the drawables of renderers drawing nothing for a
+	// while (see trim), by the handle in their info.
+	cfAbsoluteTimeGetCurrent      func() float64
+	cfRunLoopTimerCreate          func(alloc uintptr, fireDate, interval float64, flags uint64, order int, callout uintptr, ctx *cfTimerContext) uintptr
+	cfRunLoopTimerSetNextFireDate func(timer uintptr, date float64)
+	cfRunLoopAddTimer             uintptr
+	cfRunLoopGetMain              uintptr
+	cfRunLoopTimerInvalidate      uintptr
+	cfRelease                     uintptr
+	commonModes                   uintptr
+	trimCallback                  uintptr
+	trimTimers                    = map[uintptr]*Renderer{}
+	lastTrimHandle                uintptr
 )
+
+// cfTimerContext is CFRunLoopTimerContext.
+type cfTimerContext struct {
+	version                          int
+	info                             uintptr
+	retain, release, copyDescription uintptr
+}
 
 func load() error {
 	loadOnce.Do(func() {
@@ -107,6 +135,21 @@ func load() error {
 		create := sym(metalLib, "MTLCreateSystemDefaultDevice")
 		name := sym(cg, "kCGColorSpaceSRGB")
 		colorSpace := sym(cg, "CGColorSpaceCreateWithName")
+		system := lib("/usr/lib/libSystem.B.dylib")
+		cf := lib("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+		if errLoad != nil {
+			return
+		}
+		dispatchDataCreate = sym(system, "dispatch_data_create")
+		dispatchRelease = sym(system, "dispatch_release")
+		timeNow := sym(cf, "CFAbsoluteTimeGetCurrent")
+		timerCreate := sym(cf, "CFRunLoopTimerCreate")
+		timerSetNext := sym(cf, "CFRunLoopTimerSetNextFireDate")
+		cfRunLoopAddTimer = sym(cf, "CFRunLoopAddTimer")
+		cfRunLoopGetMain = sym(cf, "CFRunLoopGetMain")
+		cfRunLoopTimerInvalidate = sym(cf, "CFRunLoopTimerInvalidate")
+		cfRelease = sym(cf, "CFRelease")
+		modes := sym(cf, "kCFRunLoopCommonModes")
 		// Methods returning structs larger than 16 bytes use another entry
 		// point on amd64.
 		stret := msgSend
@@ -117,6 +160,15 @@ func load() error {
 			return
 		}
 		purego.RegisterFunc(&createDevice, create)
+		purego.RegisterFunc(&cfAbsoluteTimeGetCurrent, timeNow)
+		purego.RegisterFunc(&cfRunLoopTimerCreate, timerCreate)
+		purego.RegisterFunc(&cfRunLoopTimerSetNextFireDate, timerSetNext)
+		commonModes = *(*uintptr)(ptr(modes))
+		trimCallback = purego.NewCallback(func(timer, info uintptr) {
+			if r := trimTimers[info]; r != nil {
+				r.trimIfIdle()
+			}
+		})
 		purego.RegisterFunc(&msgReplaceRegion, msgSend)
 		purego.RegisterFunc(&msgGetBytes, msgSend)
 		purego.RegisterFunc(&msgSetScissor, msgSend)
@@ -246,6 +298,14 @@ type Renderer struct {
 	err     error
 	checked bool
 
+	// lastRender is when the last frame drew; trimTimer trims the
+	// drawables once none has for a while, armed until it fires, and
+	// trimmed is whether it did.
+	lastRender         time.Time
+	trimTimer          uintptr
+	trimHandle         uintptr
+	trimArmed, trimmed bool
+
 	b gpu.Builder
 }
 
@@ -272,6 +332,12 @@ func New(layer uintptr) (r *Renderer, err error) {
 		send(ml, "setDevice:", r.device)
 		send(ml, "setPixelFormat:", pixelFormatBGRA8Unorm)
 		send(ml, "setFramebufferOnly:", 1)
+		// Frames wait for the last to finish, so two drawables do,
+		// rather than the three Core Animation makes otherwise while a
+		// window animates: one less frame of memory.
+		if respondsTo(ml, "setMaximumDrawableCount:") {
+			send(ml, "setMaximumDrawableCount:", 2)
+		}
 		// Frames show with the window's other changes, as during a live
 		// resize, instead of a moment after them.
 		send(ml, "setPresentsWithTransaction:", 1)
@@ -314,7 +380,10 @@ func (r *Renderer) init() error {
 		return errors.New("metal: no command queue")
 	}
 	var errObj id
-	lib := send(r.device, "newLibraryWithSource:options:error:", nsString(shaderSource), 0, uintptr(unsafe.Pointer(&errObj)))
+	lib := r.compiledLibrary()
+	if lib == 0 {
+		lib = send(r.device, "newLibraryWithSource:options:error:", nsString(shaderSource), 0, uintptr(unsafe.Pointer(&errObj)))
+	}
 	if lib == 0 {
 		return fmt.Errorf("metal: cannot compile the shader: %s", describe(errObj))
 	}
@@ -352,6 +421,28 @@ func (r *Renderer) init() error {
 		return errors.New("metal: cannot create a texture")
 	}
 	return nil
+}
+
+// compiledLibrary returns the library compiled from the shader ahead of
+// time, or 0 when it was compiled from another shader.metal (go generate
+// was not run since it changed) or Metal cannot load it.
+func (r *Renderer) compiledLibrary() id {
+	sum := sha256.Sum256([]byte(shaderSource))
+	if hex.EncodeToString(sum[:]) != shaderLibrarySum || dispatchDataCreate == 0 || !respondsTo(r.device, "newLibraryWithData:error:") {
+		return 0
+	}
+	// Without a destructor, dispatch_data_create copies the bytes.
+	data, _, _ := purego.SyscallN(dispatchDataCreate, uintptr(unsafe.Pointer(&shaderLibrary[0])), uintptr(len(shaderLibrary)), 0, 0)
+	if data == 0 {
+		return 0
+	}
+	defer purego.SyscallN(dispatchRelease, data)
+	var errObj id
+	return send(r.device, "newLibraryWithData:error:", data, uintptr(unsafe.Pointer(&errObj)))
+}
+
+func respondsTo(obj id, method string) bool {
+	return byte(send(obj, "respondsToSelector:", uintptr(sel(method)))) != 0
 }
 
 // newTexture returns an owned w×h texture holding pix, rows of stride
@@ -537,7 +628,7 @@ func (r *Renderer) render(s *scene.Scene) error {
 		scale = 1
 	}
 	bounds := msgRect(r.superlayer, sel("bounds"))
-	if s.Width != r.w || s.Height != r.h || scale != r.scale || bounds != r.bounds {
+	if s.Width != r.w || s.Height != r.h || scale != r.scale || bounds != r.bounds || r.trimmed {
 		// Without animating the change, as layers do by default.
 		tx := class("CATransaction")
 		send(tx, "begin")
@@ -546,7 +637,7 @@ func (r *Renderer) render(s *scene.Scene) error {
 		msgSetFloat(r.layer, sel("setContentsScale:"), scale)
 		msgSetSize(r.layer, sel("setDrawableSize:"), cgSize{float64(s.Width), float64(s.Height)})
 		send(tx, "commit")
-		r.w, r.h, r.scale, r.bounds = s.Width, s.Height, scale, bounds
+		r.w, r.h, r.scale, r.bounds, r.trimmed = s.Width, s.Height, scale, bounds, false
 	}
 	drawable := send(r.layer, "nextDrawable")
 	if drawable == 0 {
@@ -560,6 +651,8 @@ func (r *Renderer) render(s *scene.Scene) error {
 	send(cb, "waitUntilScheduled")
 	send(drawable, "present")
 	r.last = send(cb, "retain")
+	r.lastRender = time.Now()
+	r.armTrim()
 	// Forget the textures of images no frame drew for a while.
 	if r.frame%120 == 0 {
 		for key, t := range r.images {
@@ -570,6 +663,62 @@ func (r *Renderer) render(s *scene.Scene) error {
 		}
 	}
 	return nil
+}
+
+// trimAfter is how long a window draws nothing before its spare drawables
+// go: about when the Metal driver frees its own memory of frames.
+const trimAfter = 2 * time.Second
+
+// armTrim has the renderer's timer trim the drawables once it draws
+// nothing for trimAfter.
+func (r *Renderer) armTrim() {
+	if r.trimArmed {
+		return
+	}
+	if r.trimTimer == 0 {
+		lastTrimHandle++
+		r.trimHandle = lastTrimHandle
+		ctx := cfTimerContext{info: r.trimHandle}
+		// Its first fire date comes below; it repeats only in theory.
+		r.trimTimer = cfRunLoopTimerCreate(0, cfAbsoluteTimeGetCurrent()+1e9, 1e9, 0, 0, trimCallback, &ctx)
+		if r.trimTimer == 0 {
+			return
+		}
+		trimTimers[r.trimHandle] = r
+		mainLoop, _, _ := purego.SyscallN(cfRunLoopGetMain)
+		purego.SyscallN(cfRunLoopAddTimer, mainLoop, r.trimTimer, commonModes)
+	}
+	cfRunLoopTimerSetNextFireDate(r.trimTimer, cfAbsoluteTimeGetCurrent()+trimAfter.Seconds())
+	r.trimArmed = true
+}
+
+// trimIfIdle trims the drawables if the window drew nothing for trimAfter,
+// and waits for that time otherwise.
+func (r *Renderer) trimIfIdle() {
+	if wait := trimAfter - time.Since(r.lastRender); wait > 0 {
+		cfRunLoopTimerSetNextFireDate(r.trimTimer, cfAbsoluteTimeGetCurrent()+wait.Seconds())
+		return
+	}
+	r.trimArmed = false
+	cfRunLoopTimerSetNextFireDate(r.trimTimer, cfAbsoluteTimeGetCurrent()+1e9)
+	r.trim()
+}
+
+// trim gives back the drawables the layer does not show. Shrinking them
+// frees those, and Core Animation keeps showing the last frame; the next
+// makes them again at full size.
+func (r *Renderer) trim() {
+	if r.layer == 0 || r.trimmed {
+		return
+	}
+	pool(func() {
+		tx := class("CATransaction")
+		send(tx, "begin")
+		send(tx, "setDisableActions:", 1)
+		msgSetSize(r.layer, sel("setDrawableSize:"), cgSize{1, 1})
+		send(tx, "commit")
+	})
+	r.trimmed = true
 }
 
 // renderOffscreen draws s into a texture of its own and returns its
@@ -605,6 +754,12 @@ func (r *Renderer) renderOffscreen(s *scene.Scene) (pix []byte, err error) {
 
 // Release frees the renderer's GPU objects and takes its layer out.
 func (r *Renderer) Release() {
+	if r.trimTimer != 0 {
+		purego.SyscallN(cfRunLoopTimerInvalidate, r.trimTimer)
+		purego.SyscallN(cfRelease, r.trimTimer)
+		delete(trimTimers, r.trimHandle)
+		r.trimTimer = 0
+	}
 	pool(func() {
 		r.waitLast()
 		if r.layer != 0 {

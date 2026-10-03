@@ -3,7 +3,7 @@
 // computes the coverage of rounded rectangles, borders, gradients and
 // shadows from signed distances, as the CPU renderer (internal/raster)
 // does. Colors are straight (not premultiplied) and blending happens in
-// sRGB space, as in browsers. The renderer compiles it when it starts.
+// sRGB space, as in browsers. go generate compiles it into shaderlib.go.
 
 #include <metal_stdlib>
 using namespace metal;

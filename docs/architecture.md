@@ -993,12 +993,21 @@ either.
     `d3dcompiler_47.dll`), so apps carry no shader compiler, into a
     flip-model swap chain on the surface's window, with WARP when no
     hardware device works;
-  - `internal/gpu/metal` with a shader in Metal Shading Language that
-    Metal compiles when the renderer starts, into a CAMetalLayer it adds to
-    the surface view's layer. Its frames present with the Core Animation
-    transaction (`presentsWithTransaction`), so a live resize shows no
-    stretched frames, and each frame waits for the GPU to finish the last
-    before it updates the textures and the instance buffer the last read;
+  - `internal/gpu/metal` with a shader in Metal Shading Language
+    compiled into a Metal library ahead of time (`go generate
+    ./internal/gpu/metal` on macOS, with Xcode's `metal` tools), which
+    spares a first launch the 100 to 150 ms Metal takes to compile the
+    source until it has cached it; a library older than `shader.metal`
+    falls back to that, and its test fails. It draws into a CAMetalLayer
+    it adds to the surface view's layer. Its frames present with the Core
+    Animation transaction (`presentsWithTransaction`), so a live resize
+    shows no stretched frames, and each frame waits for the GPU to finish
+    the last before it updates the textures and the instance buffer the
+    last read, so two drawables do rather than the three a layer makes
+    while a window animates. Two seconds after the last frame, as the
+    driver frees its own memory of frames, a timer shrinks the drawables,
+    which frees all but the one shown, until the next frame makes them
+    again: an idle window keeps one frame of memory;
   - `internal/gpu/gl` with the shader in GLSL 3.30 or GLSL ES 3.00, which
     the driver compiles when the renderer starts, into the framebuffer of
     the GtkGLArea, which GTK shows. GL functions come from libepoxy, as

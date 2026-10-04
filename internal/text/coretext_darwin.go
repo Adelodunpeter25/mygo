@@ -207,7 +207,7 @@ func loadCoreText() error {
 	if len(missing) > 0 {
 		return fmt.Errorf("cannot load %s", strings.Join(missing, ", "))
 	}
-	bind(cf, &ct.release, "CFRelease")
+	bindDirect(cf, text, addr)
 	bind(cf, &ct.dataGetLength, "CFDataGetLength")
 	bind(cf, &ct.dataGetBytePtr, "CFDataGetBytePtr")
 	bind(text, &ct.fontGetUnderlinePos, "CTFontGetUnderlinePosition")
@@ -218,24 +218,12 @@ func loadCoreText() error {
 	bind(text, &ct.fontCreatePath, "CTFontCreatePathForGlyph")
 	bind(cg, &ct.pathApply, "CGPathApply")
 	bind(cg, &ct.pathRelease, "CGPathRelease")
-	bind(cf, &ct.retain, "CFRetain")
-	bind(cf, &ct.hash, "CFHash")
-	bind(cf, &ct.equal, "CFEqual")
-	bind(cf, &ct.stringWithCharacters, "CFStringCreateWithCharacters")
 	bind(cf, &ct.stringWithBytes, "CFStringCreateWithBytes")
 	bind(cf, &ct.stringGetLength, "CFStringGetLength")
 	bind(cf, &ct.stringGetCharacters, "CFStringGetCharacters")
-	bind(cf, &ct.dictionaryCreate, "CFDictionaryCreate")
-	bind(cf, &ct.dictionaryGetValue, "CFDictionaryGetValue")
-	bind(cf, &ct.arrayGetCount, "CFArrayGetCount")
-	bind(cf, &ct.arrayGetValueAtIndex, "CFArrayGetValueAtIndex")
 	bind(cf, &ct.setCreate, "CFSetCreate")
 	bind(cf, &ct.arrayCreate, "CFArrayCreate")
-	bind(cf, &ct.numberCreate, "CFNumberCreate")
 	bind(cf, &ct.numberGetValue, "CFNumberGetValue")
-	bind(cf, &ct.attributedString, "CFAttributedStringCreate")
-	bind(cf, &ct.attributedMutable, "CFAttributedStringCreateMutableCopy")
-	bind(cf, &ct.attributedSet, "CFAttributedStringSetAttribute")
 	bind(cf, &ct.dataCreate, "CFDataCreate")
 	ct.keyCallbacks = addr(cf, "kCFTypeDictionaryKeyCallBacks")
 	ct.valueCallbacks = addr(cf, "kCFTypeDictionaryValueCallBacks")
@@ -262,19 +250,7 @@ func loadCoreText() error {
 	bind(text, &ct.fontGetBoundingRects, "CTFontGetBoundingRectsForGlyphs")
 	bind(text, &ct.fontDrawGlyphs, "CTFontDrawGlyphs")
 	bind(text, &ct.paragraphStyleCreate, "CTParagraphStyleCreate")
-	bind(text, &ct.typesetterCreate, "CTTypesetterCreateWithAttributedString")
 	bind(text, &ct.suggestLineBreak, "CTTypesetterSuggestLineBreak")
-	bind(text, &ct.typesetterCreateLine, "CTTypesetterCreateLine")
-	bind(text, &ct.lineGetGlyphRuns, "CTLineGetGlyphRuns")
-	bind(text, &ct.lineGetStringRange, "CTLineGetStringRange")
-	bind(text, &ct.runGetGlyphCount, "CTRunGetGlyphCount")
-	bind(text, &ct.runGetStringRange, "CTRunGetStringRange")
-	bind(text, &ct.runGetStatus, "CTRunGetStatus")
-	bind(text, &ct.runGetAttributes, "CTRunGetAttributes")
-	bind(text, &ct.runGetGlyphs, "CTRunGetGlyphs")
-	bind(text, &ct.runGetPositions, "CTRunGetPositions")
-	bind(text, &ct.runGetAdvances, "CTRunGetAdvances")
-	bind(text, &ct.runGetStringIndices, "CTRunGetStringIndices")
 	bind(cg, &ct.colorSpaceDeviceRGB, "CGColorSpaceCreateDeviceRGB")
 	bind(cg, &ct.bitmapContextCreate, "CGBitmapContextCreate")
 	bind(cg, &ct.contextRelease, "CGContextRelease")
@@ -314,6 +290,91 @@ func loadCoreText() error {
 		}
 	}
 	return nil
+}
+
+// bindDirect binds the functions of Core Foundation and Core Text that
+// each layout calls to call them through purego.SyscallN, which allocates
+// once a call where RegisterFunc's reflection allocates three or more
+// times. They take integers, pointers and CFRanges, which C passes in two
+// integer registers and returns in the first two on arm64 and amd64, as
+// SyscallN's r1 and r2.
+func bindDirect(cf, text uintptr, addr func(lib uintptr, name string) uintptr) {
+	release, retain := addr(cf, "CFRelease"), addr(cf, "CFRetain")
+	ct.release = func(obj uintptr) { purego.SyscallN(release, obj) }
+	ct.retain = func(obj uintptr) uintptr { r, _, _ := purego.SyscallN(retain, obj); return r }
+	hash, equal := addr(cf, "CFHash"), addr(cf, "CFEqual")
+	ct.hash = func(obj uintptr) uint { r, _, _ := purego.SyscallN(hash, obj); return uint(r) }
+	ct.equal = func(a, b uintptr) bool { r, _, _ := purego.SyscallN(equal, a, b); return uint8(r) != 0 }
+	stringWithCharacters := addr(cf, "CFStringCreateWithCharacters")
+	ct.stringWithCharacters = func(alloc uintptr, chars *uint16, n int) uintptr {
+		r, _, _ := purego.SyscallN(stringWithCharacters, alloc, uintptr(unsafe.Pointer(chars)), uintptr(n))
+		return r
+	}
+	dictionaryCreate, dictionaryGetValue := addr(cf, "CFDictionaryCreate"), addr(cf, "CFDictionaryGetValue")
+	ct.dictionaryCreate = func(alloc uintptr, keys, values *uintptr, n int, keyCallbacks, valueCallbacks uintptr) uintptr {
+		r, _, _ := purego.SyscallN(dictionaryCreate, alloc, uintptr(unsafe.Pointer(keys)), uintptr(unsafe.Pointer(values)), uintptr(n), keyCallbacks, valueCallbacks)
+		return r
+	}
+	ct.dictionaryGetValue = func(d, key uintptr) uintptr { r, _, _ := purego.SyscallN(dictionaryGetValue, d, key); return r }
+	arrayGetCount, arrayGetValueAtIndex := addr(cf, "CFArrayGetCount"), addr(cf, "CFArrayGetValueAtIndex")
+	ct.arrayGetCount = func(a uintptr) int { r, _, _ := purego.SyscallN(arrayGetCount, a); return int(r) }
+	ct.arrayGetValueAtIndex = func(a uintptr, i int) uintptr {
+		r, _, _ := purego.SyscallN(arrayGetValueAtIndex, a, uintptr(i))
+		return r
+	}
+	numberCreate := addr(cf, "CFNumberCreate")
+	ct.numberCreate = func(alloc uintptr, typ int, value unsafe.Pointer) uintptr {
+		r, _, _ := purego.SyscallN(numberCreate, alloc, uintptr(typ), uintptr(value))
+		return r
+	}
+	attributedString, attributedMutable := addr(cf, "CFAttributedStringCreate"), addr(cf, "CFAttributedStringCreateMutableCopy")
+	attributedSet := addr(cf, "CFAttributedStringSetAttribute")
+	ct.attributedString = func(alloc, str, attrs uintptr) uintptr {
+		r, _, _ := purego.SyscallN(attributedString, alloc, str, attrs)
+		return r
+	}
+	ct.attributedMutable = func(alloc uintptr, max int, attributed uintptr) uintptr {
+		r, _, _ := purego.SyscallN(attributedMutable, alloc, uintptr(max), attributed)
+		return r
+	}
+	ct.attributedSet = func(attributed uintptr, r cfRange, name, value uintptr) {
+		purego.SyscallN(attributedSet, attributed, uintptr(r.location), uintptr(r.length), name, value)
+	}
+	typesetterCreate, typesetterCreateLine := addr(text, "CTTypesetterCreateWithAttributedString"), addr(text, "CTTypesetterCreateLine")
+	ct.typesetterCreate = func(str uintptr) uintptr { r, _, _ := purego.SyscallN(typesetterCreate, str); return r }
+	ct.typesetterCreateLine = func(typesetter uintptr, r cfRange) uintptr {
+		line, _, _ := purego.SyscallN(typesetterCreateLine, typesetter, uintptr(r.location), uintptr(r.length))
+		return line
+	}
+	lineGetGlyphRuns, lineGetStringRange := addr(text, "CTLineGetGlyphRuns"), addr(text, "CTLineGetStringRange")
+	ct.lineGetGlyphRuns = func(line uintptr) uintptr { r, _, _ := purego.SyscallN(lineGetGlyphRuns, line); return r }
+	ct.lineGetStringRange = func(line uintptr) cfRange {
+		loc, n, _ := purego.SyscallN(lineGetStringRange, line)
+		return cfRange{int(loc), int(n)}
+	}
+	runGetGlyphCount, runGetStringRange := addr(text, "CTRunGetGlyphCount"), addr(text, "CTRunGetStringRange")
+	runGetStatus, runGetAttributes := addr(text, "CTRunGetStatus"), addr(text, "CTRunGetAttributes")
+	ct.runGetGlyphCount = func(run uintptr) int { r, _, _ := purego.SyscallN(runGetGlyphCount, run); return int(r) }
+	ct.runGetStringRange = func(run uintptr) cfRange {
+		loc, n, _ := purego.SyscallN(runGetStringRange, run)
+		return cfRange{int(loc), int(n)}
+	}
+	ct.runGetStatus = func(run uintptr) uint32 { r, _, _ := purego.SyscallN(runGetStatus, run); return uint32(r) }
+	ct.runGetAttributes = func(run uintptr) uintptr { r, _, _ := purego.SyscallN(runGetAttributes, run); return r }
+	runGetGlyphs, runGetPositions := addr(text, "CTRunGetGlyphs"), addr(text, "CTRunGetPositions")
+	runGetAdvances, runGetStringIndices := addr(text, "CTRunGetAdvances"), addr(text, "CTRunGetStringIndices")
+	ct.runGetGlyphs = func(run uintptr, r cfRange, out *uint16) {
+		purego.SyscallN(runGetGlyphs, run, uintptr(r.location), uintptr(r.length), uintptr(unsafe.Pointer(out)))
+	}
+	ct.runGetPositions = func(run uintptr, r cfRange, out *cgPoint) {
+		purego.SyscallN(runGetPositions, run, uintptr(r.location), uintptr(r.length), uintptr(unsafe.Pointer(out)))
+	}
+	ct.runGetAdvances = func(run uintptr, r cfRange, out *cgSize) {
+		purego.SyscallN(runGetAdvances, run, uintptr(r.location), uintptr(r.length), uintptr(unsafe.Pointer(out)))
+	}
+	ct.runGetStringIndices = func(run uintptr, r cfRange, out *int) {
+		purego.SyscallN(runGetStringIndices, run, uintptr(r.location), uintptr(r.length), uintptr(unsafe.Pointer(out)))
+	}
 }
 
 type coreText struct {

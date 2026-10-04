@@ -38,16 +38,17 @@ type host interface {
 // the view function, lays them out, paints them and routes input to the
 // elements of the last frame. Main thread only, except where noted.
 type engine struct {
-	view    func(*Context)
-	host    host
-	c       Context
-	text    *text.System
-	scene   scene.Scene
-	painter Painter
-	paths   paths
-	svgs    svgs
-	flex    flexScratch
-	grid    gridScratch
+	view     func(*Context)
+	host     host
+	c        Context
+	text     *text.System
+	scene    scene.Scene
+	painter  Painter
+	glyphRun glyphRun
+	paths    paths
+	svgs     svgs
+	flex     flexScratch
+	grid     gridScratch
 
 	states map[uint64]*state
 	// free are states pruned, which new elements take: rows coming into

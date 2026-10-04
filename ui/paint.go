@@ -320,7 +320,9 @@ func (p *Painter) textLayout(l *text.Layout, x, y float32, color Color, ts textS
 	start := int32(len(p.s.Glyphs))
 	var run *glyphRun
 	if sys.JoinsGlyphs() {
-		run = &glyphRun{}
+		// The engine's, whose buffers each text reuses.
+		run = &p.rt.glyphRun
+		run.ids, run.pens, run.glyphs = run.ids[:0], run.pens[:0], run.glyphs[:0]
 	}
 	for li := range l.Lines {
 		line := &l.Lines[li]

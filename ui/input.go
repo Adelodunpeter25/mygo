@@ -823,9 +823,13 @@ func (e *Element) FocusVisible() bool { return e.Focused() && e.c.rt.focusVisibl
 // FocusWithin reports whether the element or one of its descendants has
 // the keyboard focus.
 func (e *Element) FocusWithin() bool {
-	for _, id := range e.c.rt.focusChain() {
-		if id == e.id {
+	rt := e.c.rt
+	for s := rt.states[rt.focused]; s != nil; s = rt.states[s.parent] {
+		if s.id == e.id {
 			return true
+		}
+		if s.parent == 0 {
+			break
 		}
 	}
 	return false

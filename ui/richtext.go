@@ -2,6 +2,7 @@ package ui
 
 import (
 	"math"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -170,12 +171,35 @@ func encodeSpans(spans []Span) string {
 // richParams returns how to lay out spans over the theme's text style,
 // wrapping lines at width (none for 0).
 func (rt *engine) richParams(width float32, spans []Span) text.Params {
+	t := rt.c.theme
+	style := text.Style{Family: t.Font, Size: t.FontSize}
+	// Views measure the same spans frame after frame.
+	for i := range rt.measured {
+		m := &rt.measured[i]
+		if m.p.Width == width && m.p.Style == style && m.spans != nil && slices.Equal(m.spans, spans) {
+			return m.p
+		}
+	}
 	var b strings.Builder
 	for _, s := range spans {
 		b.WriteString(s.Text)
 	}
-	t := rt.c.theme
-	return text.Params{Text: b.String(), Width: width, Style: text.Style{Family: t.Font, Size: t.FontSize}, Spans: encodeSpans(spans)}
+	p := text.Params{Text: b.String(), Width: width, Style: style, Spans: encodeSpans(spans)}
+	m := &rt.measured[rt.nextMeasured]
+	rt.nextMeasured = (rt.nextMeasured + 1) % len(rt.measured)
+	// Strings do not change: a copy of the spans keeps them.
+	m.spans, m.p = append(m.spans[:0], spans...), p
+	if m.spans == nil {
+		m.spans = []Span{}
+	}
+	return p
+}
+
+// measuredSpans are spans Painter.RichText or MeasureText laid out, and
+// how.
+type measuredSpans struct {
+	spans []Span
+	p     text.Params
 }
 
 // RichText draws spans of text as RichText shows them, with its top-left

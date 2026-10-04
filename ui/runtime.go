@@ -45,10 +45,13 @@ type engine struct {
 	scene    scene.Scene
 	painter  Painter
 	glyphRun glyphRun
-	paths    paths
-	svgs     svgs
-	flex     flexScratch
-	grid     gridScratch
+	// measured are the last spans laid out outside elements (richParams).
+	measured     [8]measuredSpans
+	nextMeasured int
+	paths        paths
+	svgs         svgs
+	flex         flexScratch
+	grid         gridScratch
 
 	states map[uint64]*state
 	// free are states pruned, which new elements take: rows coming into

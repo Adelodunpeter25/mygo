@@ -205,19 +205,26 @@ func diffSceneTester(diff bool) (*Tester, *diffScene) {
 }
 
 // sidebarScroller scrolls the history by 40 DIPs a frame, down to its end
-// and back up again.
+// and back up again, or within the rows of lo to hi. Over the whole list,
+// rows come into view whose texts were not laid out for a while, as when
+// scrolling through a long history: the text system lays them out again.
 type sidebarScroller struct {
-	tt   *Tester
-	d    *diffScene
-	down bool
+	tt     *Tester
+	d      *diffScene
+	down   bool
+	lo, hi int
 }
 
 func (s *sidebarScroller) step() {
 	first, last := s.d.history.Visible()
+	lo, hi := s.lo, s.hi
+	if hi == 0 {
+		lo, hi = 0, len(s.d.commits)-1
+	}
 	switch {
-	case last >= len(s.d.commits)-1:
+	case last >= hi:
 		s.down = false
-	case first <= 0:
+	case first <= lo:
 		s.down = true
 	}
 	dy := float32(-40)
@@ -239,13 +246,20 @@ func BenchmarkDiffSteady(b *testing.B) {
 
 // BenchmarkDiffScrollSidebar renders the frames scrolling the history by
 // 40 DIPs without the diff, and BenchmarkDiffScroll with it.
-func BenchmarkDiffScrollSidebar(b *testing.B) { benchDiffScroll(b, false) }
-func BenchmarkDiffScroll(b *testing.B)        { benchDiffScroll(b, true) }
+// BenchmarkDiffScrollSidebarWarm scrolls within 40 rows, whose texts stay
+// laid out.
+func BenchmarkDiffScrollSidebar(b *testing.B)     { benchDiffScroll(b, false, 0, 0) }
+func BenchmarkDiffScroll(b *testing.B)            { benchDiffScroll(b, true, 0, 0) }
+func BenchmarkDiffScrollSidebarWarm(b *testing.B) { benchDiffScroll(b, false, 80, 120) }
 
-func benchDiffScroll(b *testing.B, diff bool) {
+func benchDiffScroll(b *testing.B, diff bool, lo, hi int) {
 	tt, d := diffSceneTester(diff)
-	s := &sidebarScroller{tt: tt, d: d}
+	s := &sidebarScroller{tt: tt, d: d, lo: lo, hi: hi}
+	for range 100 {
+		s.step()
+	}
 	b.ReportAllocs()
+	b.ResetTimer()
 	for b.Loop() {
 		s.step()
 	}
@@ -264,5 +278,11 @@ func TestDiffFrameAllocs(t *testing.T) {
 	tt, d = diffSceneTester(true)
 	s = &sidebarScroller{tt: tt, d: d}
 	both := testing.AllocsPerRun(100, s.step)
-	t.Logf("allocations a frame: steady %.0f, scrolling the sidebar %.0f, with the diff %.0f", steady, sidebar, both)
+	tt, d = diffSceneTester(false)
+	s = &sidebarScroller{tt: tt, d: d, lo: 80, hi: 120}
+	for range 100 {
+		s.step()
+	}
+	warm := testing.AllocsPerRun(100, s.step)
+	t.Logf("allocations a frame: steady %.0f, scrolling the sidebar %.0f, with the diff %.0f, within rows laid out %.0f", steady, sidebar, both, warm)
 }

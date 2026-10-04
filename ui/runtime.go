@@ -50,7 +50,10 @@ type engine struct {
 	grid    gridScratch
 
 	states map[uint64]*state
-	frame  uint64
+	// free are states pruned, which new elements take: rows coming into
+	// a list's view take those of rows that went out of it.
+	free  []*state
+	frame uint64
 	// pass is the pass of the view building the frame: the last one
 	// builds the elements that stay.
 	pass int
@@ -81,15 +84,17 @@ type engine struct {
 	pointerX, pointerY float32
 	pointerIn          bool
 	hover              []uint64
-	pressed            *state
-	pressButton        int
-	focused            uint64
-	focusVisible       bool
-	windowFocused      bool
-	keys               []keyEvent
-	menu               menuState
-	toasts             []toast
-	nextToast          uint64
+	// chain is a buffer for the elements under the pointer.
+	chain         []uint64
+	pressed       *state
+	pressButton   int
+	focused       uint64
+	focusVisible  bool
+	windowFocused bool
+	keys          []keyEvent
+	menu          menuState
+	toasts        []toast
+	nextToast     uint64
 	// mods are the modifiers of the last pointer event.
 	mods Modifiers
 
@@ -340,6 +345,12 @@ func (rt *engine) prune() {
 			}
 			if !rt.keptAlive(s) {
 				delete(rt.states, id)
+				if rt.scrollDrag.st == s {
+					rt.scrollDrag.st = nil
+				}
+				if len(rt.free) < maxFree {
+					rt.free = append(rt.free, s)
+				}
 			}
 		}
 	}
@@ -349,6 +360,9 @@ func (rt *engine) prune() {
 		rt.focused = 0
 	}
 }
+
+// maxFree is how many pruned states the engine keeps for new elements.
+const maxFree = 256
 
 // keptAlive reports whether a state the frame did not build is in a page
 // that a Router keeps: one of its history, or inside one.
@@ -391,14 +405,16 @@ func (rt *engine) armTimer() {
 	at := rt.wakeAt
 	rt.wakeAt = time.Time{}
 	rt.wakeMu.Unlock()
-	if rt.timer != nil {
-		rt.timer.Stop()
-		rt.timer = nil
+	switch {
+	case at.IsZero():
+		if rt.timer != nil {
+			rt.timer.Stop()
+		}
+	case rt.timer != nil:
+		rt.timer.Reset(max(time.Until(at), time.Millisecond))
+	default:
+		rt.timer = time.AfterFunc(max(time.Until(at), time.Millisecond), rt.host.invalidate)
 	}
-	if at.IsZero() {
-		return
-	}
-	rt.timer = time.AfterFunc(max(time.Until(at), time.Millisecond), rt.host.invalidate)
 }
 
 func (rt *engine) close() {

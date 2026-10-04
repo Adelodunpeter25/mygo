@@ -368,7 +368,13 @@ type shortcut struct {
 func (rt *engine) stateFor(id uint64) *state {
 	s := rt.states[id]
 	if s == nil {
-		s = &state{id: id, born: rt.frame}
+		if n := len(rt.free); n > 0 {
+			// A state pruned, which nothing refers to any more.
+			s, rt.free = rt.free[n-1], rt.free[:n-1]
+			*s = state{id: id, born: rt.frame}
+		} else {
+			s = &state{id: id, born: rt.frame}
+		}
 		rt.states[id] = s
 	}
 	s.seen, s.pass = rt.frame, rt.pass

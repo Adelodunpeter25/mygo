@@ -275,6 +275,8 @@ type System struct {
 
 	layouts map[Params]*cached
 	frame   uint64
+	// made counts the layouts made (LayoutsMade).
+	made uint64
 
 	glyphs map[glyphKey]*atlasEntry
 	places map[placeKey]placement
@@ -498,6 +500,14 @@ func (s *System) Layout(p Params) *Layout {
 	return &c.layout
 }
 
+// LayoutsMade returns how many layouts the system has made, those Layout
+// found in its cache left out.
+func (s *System) LayoutsMade() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.made
+}
+
 // Shape lays out p.Text as Layout does, but caches nothing, for text that
 // its caller keeps or rarely draws twice. The result belongs to the
 // caller.
@@ -549,6 +559,7 @@ func metricsOf(f *Font, style Style) lineMetrics {
 }
 
 func (s *System) layout(p Params) *cached {
+	s.made++
 	s.engine().resetScratch()
 	m := metricsOf(s.font(p.Style), p.Style)
 	runes := []rune(p.Text)

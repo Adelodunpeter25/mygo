@@ -124,6 +124,8 @@ type engine struct {
 	// announcements are the texts for assistive technology to read out
 	// (Context.Announce).
 	announcements []string
+	// stats measures frames for MYGO_FRAME_STATS, nil when it is unset.
+	stats *frameStats
 	// dropOver is the element files are dragged over; access is true once
 	// assistive technology asked for the content.
 	dropOver   uint64
@@ -197,6 +199,9 @@ type keyEvent struct {
 func newRuntime(view func(*Context), h host) *engine {
 	rt := &engine{view: view, host: h, text: textSystem(), states: map[uint64]*state{}, windowFocused: true}
 	rt.c.rt = rt
+	if frameStatsOn {
+		rt.stats = newFrameStats(frameStatsThreshold)
+	}
 	return rt
 }
 
@@ -236,6 +241,7 @@ func (rt *engine) runFrame() {
 	defer func() { rt.inFrame = false }()
 
 	rt.frame++
+	rt.stats.begin(rt)
 	now := time.Now()
 	w, h, scale := rt.host.size()
 	rt.c.titleBar = rt.host.titleBar()
@@ -267,9 +273,14 @@ func (rt *engine) runFrame() {
 			break
 		}
 	}
+	if rt.stats != nil {
+		rt.stats.passes = rt.pass + 1
+	}
+	rt.stats.lap(phaseBuild)
 	root := rt.c.root
 	layoutTree(root, w, h)
 	rt.commit(root)
+	rt.stats.lap(phaseLayout)
 	rt.paint(root, w, h, scale)
 	for try := 0; try < 2 && rt.text.Full(); try++ {
 		// The glyph atlas filled up and left some out: make room, keeping
@@ -277,7 +288,9 @@ func (rt *engine) runFrame() {
 		rt.text.MakeRoom()
 		rt.paint(root, w, h, scale)
 	}
+	rt.stats.lap(phasePaint)
 	rt.host.present(&rt.scene)
+	rt.stats.lap(phasePresent)
 	rt.prune()
 	rt.prunePictures()
 	rt.text.EndFrame()
@@ -297,6 +310,7 @@ func (rt *engine) runFrame() {
 	}
 	rt.armTimer()
 	rt.showMenu()
+	rt.stats.end(rt)
 }
 
 // endPass forgets the input the pass handled.

@@ -107,7 +107,8 @@ func (p *Painter) element(e *Element) {
 					}
 				}
 			}
-			p.textLayout(e.tl, ox, oy, ts.color, ts, newSpanPaint(e.spans))
+			var sp spanPaint
+			p.textLayout(e.tl, ox, oy, ts.color, ts, e.paintSpans(&sp))
 		case kindImage:
 			p.image(e)
 		case kindIcon:

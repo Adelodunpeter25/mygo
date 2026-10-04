@@ -342,10 +342,12 @@ type state struct {
 	hasDropped   bool
 	dropX, dropY float32
 	editor       *editor
-	locals       map[any]any
-	anims        map[any]*anim
-	shortcuts    []shortcut
-	delivered    []shortcut
+	// spans keeps what a text made of its spans in the last frame.
+	spans     *spanCache
+	locals    map[any]any
+	anims     map[any]*anim
+	shortcuts []shortcut
+	delivered []shortcut
 
 	// input, caret and takesText are those of the last frame's element
 	// (HandleInput, TextCaret).

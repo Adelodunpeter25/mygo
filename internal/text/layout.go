@@ -303,10 +303,21 @@ type System struct {
 	starts     []int
 	advances   []float32
 	ellipsized []rune
+	// marks caches the width of the ellipsis of each style.
+	marks map[markKey]float32
 }
 
+type markKey struct {
+	style Style
+	mark  string // Params.Ellipsis
+	rtl   bool
+}
+
+// cached is a layout, with room for one line, as most layouts have, and
+// the frame that used it last.
 type cached struct {
-	layout *Layout
+	layout Layout
+	line   [1]Line
 	used   uint64
 }
 
@@ -316,6 +327,7 @@ func newSystem() *System {
 	return &System{
 		fonts:      map[Style]*Font{},
 		layouts:    map[Params]*cached{},
+		marks:      map[markKey]float32{},
 		glyphs:     map[glyphKey]*atlasEntry{},
 		places:     map[placeKey]placement{},
 		runs:       map[runKey]*atlasEntry{},
@@ -384,6 +396,7 @@ func (s *System) SetFontRendering(antialias, hinting, subpixels string) {
 		f.setFontRendering(antialias, hinting, subpixels)
 		clear(s.fonts)
 		clear(s.layouts)
+		clear(s.marks)
 		clear(s.glyphs)
 		clear(s.places)
 		clear(s.runs)
@@ -406,6 +419,7 @@ func (s *System) SetUIFamily(family string) {
 		u.setUIFamily(family)
 		clear(s.fonts)
 		clear(s.layouts)
+		clear(s.marks)
 	}
 }
 
@@ -420,6 +434,7 @@ func (s *System) RegisterFont(data []byte, family string) error {
 	}
 	clear(s.fonts)
 	clear(s.layouts)
+	clear(s.marks)
 	return nil
 }
 
@@ -450,6 +465,7 @@ func (s *System) EndFrame() {
 		// glyphs as it makes room; the next frame lays out and draws its
 		// text anew.
 		clear(s.layouts)
+		clear(s.marks)
 		clear(s.fonts)
 		clear(s.glyphs)
 		clear(s.places)
@@ -474,11 +490,12 @@ func (s *System) Layout(p Params) *Layout {
 	defer s.mu.Unlock()
 	if c, ok := s.layouts[p]; ok {
 		c.used = s.frame
-		return c.layout
+		return &c.layout
 	}
-	l := s.layout(p)
-	s.layouts[p] = &cached{l, s.frame}
-	return l
+	c := s.layout(p)
+	c.used = s.frame
+	s.layouts[p] = c
+	return &c.layout
 }
 
 // Shape lays out p.Text as Layout does, but caches nothing, for text that
@@ -487,7 +504,7 @@ func (s *System) Layout(p Params) *Layout {
 func (s *System) Shape(p Params) *Layout {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.layout(p)
+	return &s.layout(p).layout
 }
 
 // Metrics returns the ascent, descent and default line height of a style.
@@ -531,12 +548,14 @@ func metricsOf(f *Font, style Style) lineMetrics {
 	return m
 }
 
-func (s *System) layout(p Params) *Layout {
+func (s *System) layout(p Params) *cached {
 	s.engine().resetScratch()
 	m := metricsOf(s.font(p.Style), p.Style)
 	runes := []rune(p.Text)
 	spans := decodeSpans(p.Spans)
-	l := &Layout{Params: p, Runes: runes}
+	c := &cached{layout: Layout{Params: p, Runes: runes}}
+	l := &c.layout
+	l.Lines = c.line[:0]
 	y := float32(0)
 	for start := 0; start <= len(runes); {
 		end := start
@@ -589,7 +608,7 @@ func (s *System) layout(p Params) *Layout {
 			}
 		}
 	}
-	return l
+	return c
 }
 
 // paragraph lays out runes[start:end], a paragraph without newlines, in at
@@ -743,9 +762,16 @@ func (s *System) ellipsize(text []rune, spans []Span, start int, p Params, rtl b
 	}
 	cut := len(rest)
 	if p.Width > 0 {
-		var ellipsis float32
-		for _, l := range e.shape(mark, p.Style, nil, 0, rtl, false) {
-			ellipsis = max(ellipsis, advance(l))
+		key := markKey{p.Style, p.Ellipsis, rtl}
+		ellipsis, ok := s.marks[key]
+		if !ok {
+			for _, l := range e.shape(mark, p.Style, nil, 0, rtl, false) {
+				ellipsis = max(ellipsis, advance(l))
+			}
+			if len(s.marks) >= 256 {
+				clear(s.marks)
+			}
+			s.marks[key] = ellipsis
 		}
 		// The advance of each cluster, at its first rune.
 		s.advances = slices.Grow(s.advances[:0], len(rest))[:len(rest)]

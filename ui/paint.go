@@ -30,7 +30,10 @@ func (rt *engine) paint(root *Element, w, h, scale float32) {
 	s.MaskAtlas, s.ColorAtlas = rt.text.MaskAtlas, rt.text.ColorAtlas
 	s.Text = rt.text.TextParams()
 	opaque := root.bg.A == 255 && root.fill == fillColor && (!root.opacitySet || root.opacity >= 1)
-	p := &Painter{rt: rt, s: s, scale: scale, opacity: 1, clip: Rect{0, 0, w, h}, opaque: opaque}
+	// The painter is the engine's, which draw callbacks get, so that
+	// painting allocates none.
+	rt.painter = Painter{rt: rt, s: s, scale: scale, opacity: 1, clip: Rect{0, 0, w, h}, opaque: opaque}
+	p := &rt.painter
 	p.element(root)
 	rt.paintDrag(p, w, h)
 }

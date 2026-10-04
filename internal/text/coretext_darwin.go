@@ -17,6 +17,7 @@ import (
 	"github.com/ebitengine/purego"
 	"github.com/ebitengine/purego/objc"
 	"github.com/egoist/mygo/internal/scene"
+	"github.com/go-text/typesetting/segmenter"
 )
 
 // Core Text lays out paragraphs: a typesetter finds the fonts, falls back
@@ -378,6 +379,7 @@ func bindDirect(cf, text uintptr, addr func(lib uintptr, name string) uintptr) {
 }
 
 type coreText struct {
+	shapeScratch
 	styles [2]uintptr // paragraph styles: left-to-right, right-to-left
 	srgb   uintptr
 	smooth bool // the user leaves font smoothing on
@@ -386,9 +388,33 @@ type coreText struct {
 
 	primary map[Style]uintptr // the CTFont of each style
 	fonts   map[uint][]*Font  // by CFHash of their CTFont
-	color   map[uintptr]bool
+	// native finds Fonts by their CTFont, which they retain.
+	native map[uintptr]*Font
+	// attrs are the attributes of strings in a font of primary, in each
+	// direction, without tracking or kerning, owned.
+	attrs map[attrsKey]uintptr
+	// seg and breaks find where lines may break (lineBreaks).
+	seg    segmenter.Segmenter
+	breaks []bool
+	color  map[uintptr]bool
+
+	// Buffers shape reuses: the text in UTF-16 with the rune of each code
+	// unit, the attributes of the string, the code unit of each rune, and
+	// what Core Text tells of a run.
+	u16          []uint16
+	index, at    []int
+	keys, values []uintptr
+	runIDs       []uint16
+	runPoints    []cgPoint
+	runAdvances  []cgSize
+	runIndices   []int
 
 	registered map[string][]registeredFace // by lowercased family
+}
+
+type attrsKey struct {
+	font uintptr
+	rtl  bool
 }
 
 type registeredFace struct {
@@ -404,6 +430,8 @@ func newCoreText() (*coreText, error) {
 	e := &coreText{
 		primary:    map[Style]uintptr{},
 		fonts:      map[uint][]*Font{},
+		native:     map[uintptr]*Font{},
+		attrs:      map[attrsKey]uintptr{},
 		color:      map[uintptr]bool{},
 		registered: map[string][]registeredFace{},
 		bands:      map[bandKey][2]float32{},
@@ -570,10 +598,7 @@ func (e *coreText) ctFont(style Style) uintptr {
 		return f
 	}
 	if len(e.primary) >= 256 {
-		for _, f := range e.primary {
-			ct.release(f)
-		}
-		clear(e.primary)
+		e.forgetPrimary()
 	}
 	if key.Features != "" {
 		// The font without the features, with them.
@@ -654,7 +679,9 @@ func (e *coreText) ctFont(style Style) uintptr {
 func (e *coreText) styleSpans(attributed uintptr, style Style, spans []Span, text []rune) uintptr {
 	styled := ct.attributedMutable(0, 0, attributed)
 	// The UTF-16 code unit of each rune.
-	at := make([]int, len(text)+1)
+	e.at = slices.Grow(e.at[:0], len(text)+1)[:len(text)+1]
+	at := e.at
+	at[0] = 0
 	for i, r := range text {
 		at[i+1] = at[i] + 1
 		if r >= 0x10000 {
@@ -761,6 +788,9 @@ func (e *coreText) font(style Style) *Font {
 
 // fontOf returns the Font of a CTFont.
 func (e *coreText) fontOf(font uintptr) *Font {
+	if f, ok := e.native[font]; ok {
+		return f
+	}
 	h := ct.hash(font)
 	for _, f := range e.fonts[h] {
 		if f.native == font || ct.equal(f.native, font) {
@@ -779,6 +809,7 @@ func (e *coreText) fontOf(font uintptr) *Font {
 		thickens: !e.isColor(font),
 	}
 	e.fonts[h] = append(e.fonts[h], f)
+	e.native[font] = f
 	return f
 }
 
@@ -787,7 +818,8 @@ func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, 
 	if font == 0 || len(text) == 0 {
 		return nil
 	}
-	u16, index := utf16Text(text)
+	e.u16, e.index = appendUTF16(e.u16[:0], e.index[:0], text)
+	u16, index := e.u16, e.index
 	n := len(u16)
 	str := ct.stringWithCharacters(0, &u16[0], n)
 	defer ct.release(str)
@@ -795,7 +827,8 @@ func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, 
 	if rtl {
 		paragraph = e.styles[1]
 	}
-	keys, values := []uintptr{ct.fontAttributeName, ct.paragraphStyleName}, []uintptr{font, paragraph}
+	attrs, cached := e.attrs[attrsKey{font, rtl}]
+	keys, values := append(e.keys[:0], ct.fontAttributeName, ct.paragraphStyleName), append(e.values[:0], font, paragraph)
 	if style.LetterSpacing != 0 && ct.trackingName != 0 {
 		// Tracking, in points as DIPs, keeps the font's kerning.
 		tracking := cfFloat(float64(style.LetterSpacing))
@@ -807,8 +840,16 @@ func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, 
 		defer ct.release(zero)
 		keys, values = append(keys, ct.kernName), append(values, zero)
 	}
-	attrs := cfDictionary(keys, values)
-	defer ct.release(attrs)
+	e.keys, e.values = keys, values
+	switch {
+	case len(keys) > 2:
+		attrs = cfDictionary(keys, values)
+		defer ct.release(attrs)
+	case !cached:
+		// The font of a style lives in primary, with its attributes.
+		attrs = cfDictionary(keys, values)
+		e.attrs[attrsKey{font, rtl}] = attrs
+	}
 	attributed := ct.attributedString(0, str, attrs)
 	defer ct.release(attributed)
 	if len(spans) > 0 {
@@ -823,9 +864,11 @@ func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, 
 	defer ct.release(typesetter)
 	var breaks []bool
 	if wholeWords && width > 0 {
-		breaks = lineBreaks(text)
+		e.breaks = lineBreaks(&e.seg, e.breaks, text)
+		breaks = e.breaks
 	}
 	var lines []shapedLine
+	mark := len(e.shapeScratch.lines)
 	for start := 0; start < n; {
 		count := n - start
 		if width > 0 {
@@ -844,7 +887,7 @@ func (e *coreText) shape(text []rune, style Style, spans []Span, width float32, 
 		if line == 0 {
 			break
 		}
-		lines = append(lines, e.line(line, index, n))
+		lines = e.addLine(mark, e.line(line, index, n))
 		ct.release(line)
 		start += count
 	}
@@ -856,23 +899,25 @@ func (e *coreText) line(line uintptr, index []int, n int) shapedLine {
 	r := ct.lineGetStringRange(line)
 	sl := shapedLine{start: at(r.location), end: at(r.location + r.length)}
 	runs := ct.lineGetGlyphRuns(line)
+	mark := len(e.shapeScratch.runs)
 	for i := range ct.arrayGetCount(runs) {
 		run := ct.arrayGetValueAtIndex(runs, i)
 		rr := ct.runGetStringRange(run)
 		f := e.fontOf(ct.dictionaryGetValue(ct.runGetAttributes(run), ct.fontAttributeName))
 		sr := shapedRun{font: f, start: at(rr.location), end: at(rr.location + rr.length)}
 		if count := ct.runGetGlyphCount(run); count > 0 {
-			glyphs := make([]uint16, count)
-			positions := make([]cgPoint, count)
-			advances := make([]cgSize, count)
-			indices := make([]int, count)
+			e.runIDs = slices.Grow(e.runIDs[:0], count)[:count]
+			e.runPoints = slices.Grow(e.runPoints[:0], count)[:count]
+			e.runAdvances = slices.Grow(e.runAdvances[:0], count)[:count]
+			e.runIndices = slices.Grow(e.runIndices[:0], count)[:count]
+			glyphs, positions, advances, indices := e.runIDs, e.runPoints, e.runAdvances, e.runIndices
 			all := cfRange{}
 			ct.runGetGlyphs(run, all, &glyphs[0])
 			ct.runGetPositions(run, all, &positions[0])
 			ct.runGetAdvances(run, all, &advances[0])
 			ct.runGetStringIndices(run, all, &indices[0])
 			rtl := ct.runGetStatus(run)&ctRunStatusRightToLeft != 0
-			sr.glyphs = make([]Glyph, count)
+			sr.glyphs = e.glyphRoom(count)
 			for j := range count {
 				sr.glyphs[j] = Glyph{
 					Font: f, ID: uint32(glyphs[j]),
@@ -882,7 +927,7 @@ func (e *coreText) line(line uintptr, index []int, n int) shapedLine {
 				}
 			}
 		}
-		sl.runs = append(sl.runs, sr)
+		sl.runs = e.addRun(mark, sr)
 	}
 	return sl
 }
@@ -1268,11 +1313,20 @@ func (e *coreText) register(data []byte, family string) error {
 			}
 		}
 	}
+	e.forgetPrimary()
+	return nil
+}
+
+// forgetPrimary lets go of the fonts of styles, and of their attributes.
+func (e *coreText) forgetPrimary() {
 	for _, f := range e.primary {
 		ct.release(f)
 	}
 	clear(e.primary)
-	return nil
+	for _, a := range e.attrs {
+		ct.release(a)
+	}
+	clear(e.attrs)
 }
 
 func (e *coreText) fontCount() int {
@@ -1292,5 +1346,6 @@ func (e *coreText) forgetFonts() {
 		}
 	}
 	clear(e.fonts)
+	clear(e.native)
 	clear(e.color)
 }

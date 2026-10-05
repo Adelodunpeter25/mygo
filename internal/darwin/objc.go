@@ -38,7 +38,8 @@ var (
 	msgSetFloat      func(obj id, sel objc.SEL, v float64)
 	msgSize          func(obj id, sel objc.SEL) NSSize
 	msgSetSize       func(obj id, sel objc.SEL, s NSSize)
-	msgPoint         func(obj id, sel objc.SEL) NSPoint
+	msgSuperSetSize  func(sup uintptr, sel objc.SEL, s NSSize)
+	msgPoint        func(obj id, sel objc.SEL) NSPoint
 	msgSetPoint      func(obj id, sel objc.SEL, p NSPoint)
 	msgInitRect      func(obj id, sel objc.SEL, r NSRect) id
 	msgInitRectID    func(obj id, sel objc.SEL, r NSRect, a id) id
@@ -127,6 +128,7 @@ func load() {
 		purego.RegisterFunc(&msgSetFloat, msgSendAddr)
 		purego.RegisterFunc(&msgSize, msgSendAddr)
 		purego.RegisterFunc(&msgSetSize, msgSendAddr)
+		purego.RegisterFunc(&msgSuperSetSize, msgSendSuperAddr)
 		purego.RegisterFunc(&msgPoint, msgSendAddr)
 		purego.RegisterFunc(&msgSetPoint, msgSendAddr)
 		purego.RegisterFunc(&msgInitRect, msgSendAddr)
@@ -252,6 +254,16 @@ func sendSuper(self id, className string, s objc.SEL, args ...uintptr) id {
 	n := copy(a[2:], args)
 	r, _, _ := purego.SyscallN(msgSendSuperAddr, a[:n+2]...)
 	return id(r)
+}
+
+// sendSuperSize is sendSuper for a method taking an NSSize, which travels in
+// floating-point registers and so cannot go through the integer arguments.
+func sendSuperSize(self id, className string, s objc.SEL, size NSSize) {
+	sup := &objcSuper{receiver: self, superClass: id(objc.Class(class(className)).SuperClass())}
+	var pin runtime.Pinner
+	pin.Pin(sup)
+	defer pin.Unpin()
+	msgSuperSetSize(uintptr(unsafe.Pointer(sup)), s, size)
 }
 
 func respondsTo(obj id, selector string) bool {

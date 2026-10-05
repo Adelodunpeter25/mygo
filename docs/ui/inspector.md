@@ -76,5 +76,5 @@ average and the slowest. Set `MYGO_FRAME_STATS` to log slow frames as well
 **Issues** lists mistakes found while building, which the toolbar counts:
 two elements given the same `Key` under one parent, say, share one state,
 so that a click, the focus or scrolling meant for one goes to the other.
-Apps log each one once; in tests, they panic where the second key was
-given.
+Apps log each one once; a [Tester](testing.md) panics where the second
+key was given, so that the test fails there.

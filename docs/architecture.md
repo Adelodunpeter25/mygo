@@ -1123,7 +1123,8 @@ either.
   frame outside package ui on the stack as it is created or keyed
   (`callSite`), only for that one. Two elements keyed alike under one
   parent share one state: `rekey` reports it (`duplicateKey`), logged
-  once and listed as an issue, and in test binaries it panics.
+  once and listed as an issue, and in a `Tester` it panics
+  (`engine.strict`), without package testing in apps.
   Production builds of `mygo build` leave the inspector out with the build
   tag `mygo_noinspector` (`inspector_off.go` stands in for it, never
   open), added to the tags of `GOFLAGS`, unless `-debug` or

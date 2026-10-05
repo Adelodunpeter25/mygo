@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"image/png"
+	"log"
+	"os"
 	"strings"
 	"testing"
 
@@ -255,14 +257,11 @@ func TestContentDuplicateKeyTellsWhere(t *testing.T) {
 		ui.Row(c).Key(1)
 		ui.Row(c).Key(1)
 	}
-	var msg any
-	w := NewWindow(WindowOptions{Width: 300, Height: 200, Content: ui.View(view)})
-	t.Cleanup(w.Destroy)
-	onMain(func() {
-		defer func() { msg = recover() }()
-		w.conn.Surface.(*fake.Surface).Frame()
-	})
-	if s, _ := msg.(string); !strings.Contains(s, "key 1") || !strings.Contains(s, "content_test.go:") {
-		t.Errorf("a duplicate key in a test panics with %q", s)
+	var out bytes.Buffer
+	log.SetOutput(&out)
+	defer log.SetOutput(os.Stderr)
+	_, _, _ = contentWindow(t, view)
+	if s := out.String(); !strings.Contains(s, "key 1") || !strings.Contains(s, "content_test.go:") {
+		t.Errorf("a duplicate key logs %q", s)
 	}
 }

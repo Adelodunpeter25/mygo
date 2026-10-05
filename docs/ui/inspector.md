@@ -20,7 +20,13 @@ mygo.NewWindow(mygo.WindowOptions{
 ```
 
 The content gives the panel the right of the window: the view gets a
-narrower window, as `c.Size()` tells. Drag the panel's left edge to resize
+narrower window, as `c.Size()` tells.
+
+Production builds of `mygo build` leave the inspector out, as their
+developer tools are off: it takes some 250 KB of a binary. `mygo build
+-debug` keeps it, as `MYGO_INSPECTOR=1 mygo build` does in a production
+build, for a window with `DevToolsEnabled` to open it there. Apps built
+with `go build` keep it unless `-tags mygo_noinspector` leaves it out. Drag the panel's left edge to resize
 it. The panel follows the appearance, light or dark.
 
 ## Elements

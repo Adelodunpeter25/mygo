@@ -18,6 +18,10 @@ import (
 // ErrUnsupported is returned by features the current backend cannot provide.
 var ErrUnsupported = errors.New("not supported on this platform")
 
+// ErrNotificationsDenied is returned by ShowNotification when the user has
+// not allowed the app to show notifications.
+var ErrNotificationsDenied = errors.New("mygo: the user does not allow notifications")
+
 // Point is a position in screen coordinates (DIPs, origin top-left of the
 // primary display).
 type Point struct{ X, Y int }

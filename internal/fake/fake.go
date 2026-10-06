@@ -261,6 +261,18 @@ func (b *Backend) RemoveNotification(id string) {
 	delete(b.notifications, id)
 }
 
+func (b *Backend) RemoveAllNotifications() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	clear(b.notifications)
+}
+
+// Delivered adds a notification the platform still shows from an earlier
+// run of the app, which the app did not show in this one.
+func (b *Backend) Delivered(n *platform.Notification) {
+	b.ShowNotification(n, func(error) {})
+}
+
 // Notifications returns the notifications shown and not yet removed.
 func (b *Backend) Notifications() []*platform.Notification {
 	b.mu.Lock()

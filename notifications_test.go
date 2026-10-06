@@ -1,6 +1,10 @@
 package mygo
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/egoist/mygo/internal/platform"
+)
 
 // showNotification shows a notification for a test. The fake backend
 // records it by its id, which is how a test sees what the platform would
@@ -22,48 +26,17 @@ func clickNotification(t *testing.T, n *Notification) {
 	onMain(func() { fb.ClickNotification(n.id) })
 }
 
-// TestNotificationDismissOnClick checks that a notification asked to
-// dismiss itself is removed once the user has clicked it, and that one
-// that was not stays where macOS leaves it, in the notification centre.
-func TestNotificationDismissOnClick(t *testing.T) {
-	stay := showNotification(t, NotificationOptions{Title: "stay"})
-	dismiss := showNotification(t, NotificationOptions{Title: "dismiss", DismissOnClick: true})
-
-	var clicked []string
-	stay.OnClick(func() { clicked = append(clicked, "stay") })
-	dismiss.OnClick(func() { clicked = append(clicked, "dismiss") })
-
-	clickNotification(t, dismiss)
-	if fb.Notification(dismiss.id) != nil {
-		t.Error("a notification with DismissOnClick is still there after a click")
-	}
-	if fb.Notification(stay.id) == nil {
-		t.Error("a notification without DismissOnClick was removed by a click")
-	}
-
-	// Its own listener still runs, whether or not it dismisses itself.
-	clickNotification(t, stay)
-	if len(clicked) != 2 || clicked[0] != "dismiss" || clicked[1] != "stay" {
-		t.Errorf("clicked = %q, want [dismiss stay]", clicked)
-	}
-	if fb.Notification(stay.id) == nil {
-		t.Error("a click removed a notification that did not ask to be")
-	}
-
-	// Clicking one that was removed already reaches nobody.
-	clickNotification(t, dismiss)
-	if len(clicked) != 2 {
-		t.Errorf("a removed notification's listener ran again: %q", clicked)
-	}
-}
-
-// TestNotificationDismissOnClickListener checks that a listener which
-// shows another notification, as answering a message may, does not have
-// that one removed along with the notification it came from.
-func TestNotificationDismissOnClickListener(t *testing.T) {
-	first := showNotification(t, NotificationOptions{Title: "first", DismissOnClick: true})
+// TestNotificationCloseOnClick: a click reaches the notification's
+// listeners, which may Close it, as macOS keeps it otherwise, and show
+// another, as answering a message does, which stays.
+func TestNotificationCloseOnClick(t *testing.T) {
+	first := showNotification(t, NotificationOptions{Title: "first"})
+	other := showNotification(t, NotificationOptions{Title: "other"})
+	clicks := 0
 	var second *Notification
 	first.OnClick(func() {
+		clicks++
+		first.Close()
 		second = NewNotification(NotificationOptions{Title: "second"})
 		if err := second.Show(); err != nil {
 			t.Errorf("Show: %v", err)
@@ -74,40 +47,42 @@ func TestNotificationDismissOnClickListener(t *testing.T) {
 		t.Fatal("the listener did not run")
 	}
 	t.Cleanup(second.Close)
-	if fb.Notification(second.id) == nil {
-		t.Error("the notification the listener showed was removed with the first")
-	}
 	if fb.Notification(first.id) != nil {
-		t.Error("the notification clicked was not removed")
+		t.Error("the notification closed in its listener is still shown")
+	}
+	if fb.Notification(second.id) == nil || fb.Notification(other.id) == nil {
+		t.Error("a notification the click did not close was removed")
+	}
+	// A click on one that was closed reaches nobody.
+	clickNotification(t, first)
+	if clicks != 1 {
+		t.Errorf("%d clicks, want 1", clicks)
 	}
 }
 
-// TestClearNotifications checks that every notification the app still has
-// shown is removed, whether or not it was asked to dismiss itself, and
-// that a click reaches none of them afterwards.
+// TestClearNotifications: every notification of the app is removed,
+// those of an earlier run that only the platform knows too, and a click
+// reaches none of them afterwards.
 func TestClearNotifications(t *testing.T) {
 	one := showNotification(t, NotificationOptions{Title: "one"})
 	two := showNotification(t, NotificationOptions{Title: "two"})
-	three := showNotification(t, NotificationOptions{Title: "three", DismissOnClick: true})
-	// One the app closed itself, which nothing is left to remove.
 	closed := showNotification(t, NotificationOptions{Title: "closed"})
 	closed.Close()
+	earlier := &platform.Notification{ID: "earlier-run", Title: "earlier"}
+	onMain(func() { fb.Delivered(earlier) })
 
 	clicked := 0
-	for _, n := range []*Notification{one, two, three, closed} {
+	for _, n := range []*Notification{one, two, closed} {
 		n.OnClick(func() { clicked++ })
 	}
 
 	ClearNotifications()
 
-	for _, n := range []*Notification{one, two, three} {
-		if fb.Notification(n.id) != nil {
-			t.Errorf("%q was not removed by ClearNotifications", n.opts.Title)
-		}
+	if left := fb.Notifications(); len(left) != 0 {
+		t.Errorf("%d notifications left after ClearNotifications", len(left))
 	}
 	clickNotification(t, one)
 	clickNotification(t, two)
-	clickNotification(t, three)
 	if clicked != 0 {
 		t.Errorf("%d listeners ran after ClearNotifications, want 0", clicked)
 	}
@@ -117,12 +92,11 @@ func TestClearNotifications(t *testing.T) {
 }
 
 // TestNotificationOptionsReachTheBackend checks that Show passes the
-// options on, which the backends read for the sound and the core reads
-// for the dismissal.
+// options on.
 func TestNotificationOptionsReachTheBackend(t *testing.T) {
 	n := showNotification(t, NotificationOptions{
 		Title: "title", Subtitle: "subtitle", Body: "body",
-		Silent: true, DismissOnClick: true,
+		Silent: true,
 	})
 	got := fb.Notification(n.id)
 	if got == nil {
@@ -131,7 +105,7 @@ func TestNotificationOptionsReachTheBackend(t *testing.T) {
 	if got.Title != "title" || got.Subtitle != "subtitle" || got.Body != "body" {
 		t.Errorf("got %q/%q/%q, want title/subtitle/body", got.Title, got.Subtitle, got.Body)
 	}
-	if !got.Silent || !got.DismissOnClick {
-		t.Errorf("Silent = %v, DismissOnClick = %v, want both true", got.Silent, got.DismissOnClick)
+	if !got.Silent {
+		t.Error("Silent = false, want true")
 	}
 }

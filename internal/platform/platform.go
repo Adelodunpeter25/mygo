@@ -698,4 +698,8 @@ type Notification struct {
 	Subtitle string
 	Body     string
 	Silent   bool
+	// DismissOnClick reports that the notification is removed once the
+	// user has clicked it. The core removes it, which is what every
+	// backend's RemoveNotification does; the backends need nothing of it.
+	DismissOnClick bool
 }

@@ -89,9 +89,16 @@ func notificationCenter() id {
 // delivers the response to a notification the user clicked while the app
 // was not running at launch: a center without a delegate then drops it,
 // and the app comes up with nothing to show.
+//
+// Only an app that can show notifications gets one.
+// [UNUserNotificationCenter currentNotificationCenter] raises
+// NSInternalInconsistencyException where there is no bundle to ask about
+// ("bundleProxyForCurrentProcess is nil"), and an Objective-C exception
+// cannot be caught from Go, so a process without one must not ask: the GUI
+// tests run out of the build directory and are such a process.
 func attachNotificationDelegate() {
 	b := theBackend
-	if b == nil || b.notifyDelegate != 0 || !hasClass("UNUserNotificationCenter") {
+	if b == nil || b.notifyDelegate != 0 || !b.NotificationsSupported() {
 		return
 	}
 	b.notifyDelegate = alloc("MyGoNotificationDelegate")

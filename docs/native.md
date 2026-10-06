@@ -68,6 +68,26 @@ desktop's notification service, Windows as notification-area balloons.
 and returns an error once the user has not allowed notifications, rather
 than silently showing nothing.
 
+macOS leaves a notification in the notification centre, so that a message
+answered once is still there to be looked at later. An app that would
+rather not keep them says so per notification with `DismissOnClick`, or
+for all of them at once, when it comes to the front:
+
+```go
+n := mygo.NewNotification(mygo.NotificationOptions{
+    Title:          "Ada",
+    Body:           "Are we still on for Thursday?",
+    DismissOnClick: true,
+})
+
+// Whatever the app still has shown, once the user is looking at it.
+mygo.App.OnDidBecomeActive(func() { mygo.ClearNotifications() })
+```
+
+`DismissOnClick` does nothing on Windows, whose notification-area balloons
+go away by themselves, nor much on Linux, where the desktop's notification
+service decides how long one stays.
+
 ## Clipboard
 
 ```go

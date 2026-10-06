@@ -1475,6 +1475,9 @@ func beforeRun() {
 	Power.IsOnBattery()
 	GlobalShortcut.UnregisterAll()
 	NewNotification(NotificationOptions{}).Close()
+	// Nothing can be shown before Run, so there is nothing to clear and
+	// no backend to ask.
+	ClearNotifications()
 	for _, c := range needsAppCalls {
 		func() {
 			defer func() { fmt.Printf("%s: %v\n", c.name, recover()) }()

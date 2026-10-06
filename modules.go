@@ -519,6 +519,12 @@ type NotificationOptions struct {
 	Body     string
 	// Silent suppresses the notification sound.
 	Silent bool
+	// DismissOnClick removes the notification once the user has clicked it,
+	// which macOS otherwise leaves in the notification centre. It has no
+	// effect on Windows, whose notification-area balloons go away by
+	// themselves, nor much on Linux, where the desktop's notification
+	// service decides how long one stays.
+	DismissOnClick bool
 }
 
 // Notification is a desktop notification.
@@ -562,11 +568,12 @@ func (n *Notification) Show() error {
 	notifications.Unlock()
 	return onMainValue(func() error {
 		return backend().ShowNotification(&platform.Notification{
-			ID:       n.id,
-			Title:    n.opts.Title,
-			Subtitle: n.opts.Subtitle,
-			Body:     n.opts.Body,
-			Silent:   n.opts.Silent,
+			ID:             n.id,
+			Title:          n.opts.Title,
+			Subtitle:       n.opts.Subtitle,
+			Body:           n.opts.Body,
+			Silent:         n.opts.Silent,
+			DismissOnClick: n.opts.DismissOnClick,
 		})
 	})
 }
@@ -579,6 +586,28 @@ func (n *Notification) Close() {
 	onMain(func() { backend().RemoveNotification(n.id) })
 }
 
+// ClearNotifications removes every notification the app still has shown,
+// the ones it did not close itself. It is what an app that would rather
+// not keep them calls as it comes to the front, so that a notification
+// the user has already answered is not waiting in the notification centre
+// next time:
+//
+//	mygo.App.OnDidBecomeActive(func() { mygo.ClearNotifications() })
+//
+// Before the app runs there is nothing shown and no backend to ask, so it
+// does nothing, as NewNotification(...).Close does.
+func ClearNotifications() {
+	notifications.Lock()
+	all := make([]*Notification, 0, len(notifications.byID))
+	for _, n := range notifications.byID {
+		all = append(all, n)
+	}
+	notifications.Unlock()
+	for _, n := range all {
+		n.Close()
+	}
+}
+
 // OnClick is called when the user clicks the notification.
 func (n *Notification) OnClick(fn func()) (off func()) { return n.onClick.add(fn, false) }
 
@@ -586,7 +615,14 @@ func notificationClicked(id string) {
 	notifications.Lock()
 	n := notifications.byID[id]
 	notifications.Unlock()
-	if n != nil {
-		fire(&n.onClick)
+	if n == nil {
+		return
+	}
+	fire(&n.onClick)
+	// After the listeners, which may show another notification, and
+	// whichever thread the backend reported the click on: Close asks for
+	// the main thread itself.
+	if n.opts.DismissOnClick {
+		n.Close()
 	}
 }

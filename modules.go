@@ -555,10 +555,10 @@ func NewNotification(opts NotificationOptions) *Notification {
 // not allowed the app to show notifications (macOS).
 var ErrNotificationsDenied = platform.ErrNotificationsDenied
 
-// Show displays the notification. On macOS, the first time an app shows
-// one, the user is asked whether to allow notifications, and the
-// notification is shown once they have; after they have not, Show returns
-// ErrNotificationsDenied.
+// Show displays the notification, and returns once the system has it. On
+// macOS the first notification asks the user whether to allow them, and
+// Show waits for the answer; it returns ErrNotificationsDenied when they
+// are not allowed.
 func (n *Notification) Show() error {
 	needsApp("Notification.Show")
 	notifications.Lock()
@@ -568,15 +568,17 @@ func (n *Notification) Show() error {
 	_, shown := notifications.byID[n.id]
 	notifications.byID[n.id] = n
 	notifications.Unlock()
-	err := onMainValue(func() error {
-		return backend().ShowNotification(&platform.Notification{
+	ch := make(chan error, 1)
+	onMain(func() {
+		backend().ShowNotification(&platform.Notification{
 			ID:       n.id,
 			Title:    n.opts.Title,
 			Subtitle: n.opts.Subtitle,
 			Body:     n.opts.Body,
 			Silent:   n.opts.Silent,
-		})
+		}, func(err error) { deliver(ch, err) })
 	})
+	err := await(ch)
 	if err != nil && !shown {
 		// Nothing will be clicked.
 		notifications.Lock()

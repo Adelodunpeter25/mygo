@@ -36,7 +36,10 @@ type Backend struct {
 	hkInstalled bool
 
 	notifyDelegate id
-	notify         notifier
+	// notifyAnswered records that the user has answered whether the app
+	// may show notifications; notifyWaiting holds those shown meanwhile.
+	notifyAnswered bool
+	notifyWaiting  []waitingNotification
 
 	stepping       int
 	quitAfterModal bool
@@ -123,9 +126,6 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 		uintptr(nsString("NSSystemColorsDidChangeNotification")), 0)
 	send(send(workspace(), "notificationCenter"), "addObserver:selector:name:object:", uintptr(b.delegate), uintptr(sel("preferencesChanged:")),
 		uintptr(nsString("NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification")), 0)
-	// Last: the answer to the settings query comes back through the run
-	// loop source.
-	b.setUpNotifications()
 	return nil
 }
 
@@ -295,7 +295,6 @@ func registerAppDelegate() {
 			return true
 		}),
 		method("applicationDidBecomeActive:", func(self id, _ objc.SEL, n id) {
-			theBackend.notificationsMayHaveChanged()
 			theBackend.h.DidBecomeActive()
 		}),
 		method("applicationDidResignActive:", func(self id, _ objc.SEL, n id) {

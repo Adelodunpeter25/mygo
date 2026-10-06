@@ -3,8 +3,6 @@
 package darwin
 
 import (
-	"fmt"
-	"slices"
 	"sync"
 
 	"github.com/ebitengine/purego/objc"
@@ -71,73 +69,58 @@ func (b *Backend) NotificationsSupported() bool {
 	return packaged && hasClass("UNUserNotificationCenter")
 }
 
-// notificationCenter returns the app's notification center. It throws
-// when the app does not run from a bundle: check NotificationsSupported
-// first.
-func notificationCenter() id {
-	return send(class("UNUserNotificationCenter"), "currentNotificationCenter")
+// notificationCenter returns the app's notification center, with the
+// delegate attached the first time. It throws when the app does not run
+// from a bundle: check NotificationsSupported first.
+func (b *Backend) notificationCenter() id {
+	center := send(class("UNUserNotificationCenter"), "currentNotificationCenter")
+	if b.notifyDelegate == 0 {
+		b.notifyDelegate = alloc("MyGoNotificationDelegate")
+		send(center, "setDelegate:", uintptr(b.notifyDelegate))
+	}
+	return center
 }
 
-// setUpNotifications attaches the notification center's delegate and asks
-// for the app's notification settings, which does not prompt the user, so
-// that the first notification knows whether it can be shown. The delegate
-// has to be there before the app finishes launching, as the system then
-// delivers the response to a notification the user clicked while the app
-// was not running.
-func (b *Backend) setUpNotifications() {
-	b.notify = notifier{
-		status: notifyUnknown,
-		add:    b.addNotification,
-		check:  b.checkNotificationSettings,
-		ask:    b.askNotificationAuthorization,
-	}
-	if !b.NotificationsSupported() {
-		return
-	}
-	b.notifyDelegate = alloc("MyGoNotificationDelegate")
-	withPool(func() {
-		send(notificationCenter(), "setDelegate:", uintptr(b.notifyDelegate))
-	})
-	b.notify.refresh()
-}
-
-// notificationsMayHaveChanged asks for the settings again when the app
-// becomes active, as the user may come back from System Settings having
-// allowed or turned off its notifications.
-func (b *Backend) notificationsMayHaveChanged() {
-	if b.notifyDelegate != 0 {
-		b.notify.refresh()
-	}
-}
-
-// checkNotificationSettings asks for the app's authorization status, which
-// comes back on a queue of the system's.
-func (b *Backend) checkNotificationSettings() {
-	withPool(func() {
-		blk := newBlock(func(_ objc.Block, settings id) {
-			// The settings are the caller's only while the block runs.
-			status := sendInt(settings, "authorizationStatus")
-			b.runOnMain(func() { b.notify.checked(status) })
-		})
-		send(notificationCenter(), "getNotificationSettingsWithCompletionHandler:", uintptr(blk))
-		blk.Release()
-	})
+// waitingNotification is a notification shown before the user has answered
+// whether the app may show notifications.
+type waitingNotification struct {
+	n    *platform.Notification
+	done func(error)
 }
 
 // notifyOptions are the permissions asked for: badge, sound and alert.
 const notifyOptions = 1<<0 | 1<<1 | 1<<2
 
-// askNotificationAuthorization prompts the user, whose answer comes back
-// on a queue of the system's.
-func (b *Backend) askNotificationAuthorization() {
+func (b *Backend) ShowNotification(n *platform.Notification, done func(error)) {
+	if !b.NotificationsSupported() {
+		done(platform.ErrUnsupported)
+		return
+	}
+	if b.notifyAnswered {
+		b.addNotification(n, done)
+		return
+	}
+	// The system drops what it is given before the user has answered
+	// whether the app may show notifications, so the first notification
+	// asks and the ones shown meanwhile wait for the answer. The system
+	// only prompts the first time; afterwards it answers at once, and
+	// adding a notification fails when System Settings does not allow it.
+	b.notifyWaiting = append(b.notifyWaiting, waitingNotification{n, done})
+	if len(b.notifyWaiting) > 1 {
+		return
+	}
 	withPool(func() {
-		blk := newBlock(func(_ objc.Block, granted bool, nsErr id) {
-			// The error is the caller's only while the block runs.
-			var err error
-			withPool(func() { err = nsError(nsErr) })
-			b.runOnMain(func() { b.notify.answered(granted, err) })
+		blk := newBlock(func(_ objc.Block, granted bool, err id) {
+			b.runOnMain(func() {
+				b.notifyAnswered = true
+				waiting := b.notifyWaiting
+				b.notifyWaiting = nil
+				for _, w := range waiting {
+					b.addNotification(w.n, w.done)
+				}
+			})
 		})
-		send(notificationCenter(), "requestAuthorizationWithOptions:completionHandler:",
+		send(b.notificationCenter(), "requestAuthorizationWithOptions:completionHandler:",
 			notifyOptions, uintptr(blk))
 		blk.Release()
 	})
@@ -145,7 +128,7 @@ func (b *Backend) askNotificationAuthorization() {
 
 // addNotification gives the system a request to show a notification. Its
 // trigger is nil, which shows it at once.
-func (b *Backend) addNotification(n *platform.Notification) {
+func (b *Backend) addNotification(n *platform.Notification, done func(error)) {
 	withPool(func() {
 		content := autorelease(alloc("UNMutableNotificationContent"))
 		send(content, "setTitle:", uintptr(nsString(n.Title)))
@@ -158,148 +141,49 @@ func (b *Backend) addNotification(n *platform.Notification) {
 		}
 		req := send(class("UNNotificationRequest"), "requestWithIdentifier:content:trigger:",
 			uintptr(nsString(n.ID)), uintptr(content), 0)
-		send(notificationCenter(), "addNotificationRequest:withCompletionHandler:", uintptr(req), 0)
+		blk := newBlock(func(_ objc.Block, nsErr id) {
+			// The error is the caller's only while the block runs.
+			var err error
+			withPool(func() { err = notificationError(nsErr) })
+			b.runOnMain(func() { done(err) })
+		})
+		send(b.notificationCenter(), "addNotificationRequest:withCompletionHandler:", uintptr(req), uintptr(blk))
+		blk.Release()
 	})
 }
 
-func (b *Backend) ShowNotification(n *platform.Notification) error {
-	if !b.NotificationsSupported() {
-		return platform.ErrUnsupported
+// unErrorNotificationsNotAllowed is UNErrorCodeNotificationsNotAllowed.
+const unErrorNotificationsNotAllowed = 1
+
+// notificationError describes an error of the notification center.
+func notificationError(err id) error {
+	if err == 0 {
+		return nil
 	}
-	return b.notify.show(n)
+	if goString(send(err, "domain")) == "UNErrorDomain" && sendInt(err, "code") == unErrorNotificationsNotAllowed {
+		return platform.ErrNotificationsDenied
+	}
+	return nsError(err)
 }
 
 func (b *Backend) RemoveNotification(ident string) {
 	if !b.NotificationsSupported() {
 		return
 	}
-	b.notify.remove(ident)
+	// One still waiting for the user's answer is not shown.
+	waiting := b.notifyWaiting[:0]
+	for _, w := range b.notifyWaiting {
+		if w.n.ID == ident {
+			w.done(nil)
+		} else {
+			waiting = append(waiting, w)
+		}
+	}
+	b.notifyWaiting = waiting
 	withPool(func() {
-		center := notificationCenter()
+		center := b.notificationCenter()
 		ids := nsArray(nsString(ident))
 		send(center, "removeDeliveredNotificationsWithIdentifiers:", uintptr(ids))
 		send(center, "removePendingNotificationRequestsWithIdentifiers:", uintptr(ids))
 	})
-}
-
-// The authorization statuses of UNAuthorizationStatus that matter here.
-// Provisional (3) and ephemeral (4) authorizations count as authorized.
-const (
-	notifyUnknown       = -1 // not known yet
-	notifyNotDetermined = 0  // the user has not been asked
-	notifyDenied        = 1
-	notifyAuthorized    = 2
-)
-
-// maxPendingNotifications is how many notifications wait for the user's
-// answer, the latest ones: the prompt can sit in Notification Center for
-// hours, and what was shown before is stale by the time the user allows.
-const maxPendingNotifications = 5
-
-// notifier keeps what the app knows of its permission to show
-// notifications, and the notifications that wait for it. Main thread only.
-// macOS answers on a queue of its own, and drops a notification it is given
-// before the user has allowed it: one shown before the answer waits here.
-// The native side is a set of functions, which tests replace.
-type notifier struct {
-	status   int   // a UNAuthorizationStatus, or notifyUnknown
-	checking bool  // the settings were asked for
-	asking   bool  // the user was prompted
-	err      error // what prompting the user failed with
-	pending  []*platform.Notification
-
-	add   func(*platform.Notification) // gives the system a notification
-	check func()                       // asks for the settings, answered by checked
-	ask   func()                       // prompts the user, answered by answered
-}
-
-// show shows n, or keeps it until the answer comes. Once the user has not
-// allowed notifications it returns ErrNotificationsDenied.
-func (s *notifier) show(n *platform.Notification) error {
-	switch s.status {
-	case notifyAuthorized:
-		s.add(n)
-		return nil
-	case notifyDenied:
-		if s.err != nil {
-			return fmt.Errorf("%w: %w", platform.ErrNotificationsDenied, s.err)
-		}
-		return platform.ErrNotificationsDenied
-	}
-	s.pending = append(s.pending, n)
-	if len(s.pending) > maxPendingNotifications {
-		s.pending = slices.Delete(s.pending, 0, 1)
-	}
-	if s.status == notifyNotDetermined {
-		s.prompt()
-	} else {
-		s.refresh()
-	}
-	return nil
-}
-
-// remove forgets the waiting copies of a notification.
-func (s *notifier) remove(ident string) {
-	s.pending = slices.DeleteFunc(s.pending, func(n *platform.Notification) bool { return n.ID == ident })
-}
-
-// refresh asks for the settings, unless the answer to a question is still
-// to come.
-func (s *notifier) refresh() {
-	if !s.checking && !s.asking {
-		s.checking = true
-		s.check()
-	}
-}
-
-func (s *notifier) prompt() {
-	if !s.asking {
-		s.asking = true
-		s.ask()
-	}
-}
-
-// checked receives the authorization status from the settings.
-func (s *notifier) checked(status int) {
-	s.checking = false
-	if s.asking {
-		// The user's answer settles it.
-		return
-	}
-	if status > notifyAuthorized {
-		status = notifyAuthorized
-	}
-	if status != s.status {
-		s.err = nil
-	}
-	s.status = status
-	if status == notifyNotDetermined {
-		if len(s.pending) > 0 {
-			s.prompt()
-		}
-		return
-	}
-	s.flush()
-}
-
-// answered receives the user's answer to the prompt.
-func (s *notifier) answered(granted bool, err error) {
-	s.asking = false
-	s.status, s.err = notifyDenied, err
-	if granted {
-		s.status, s.err = notifyAuthorized, nil
-	}
-	s.flush()
-}
-
-// flush gives the system the waiting notifications once the app may show
-// them, and gives them up otherwise.
-func (s *notifier) flush() {
-	pending := s.pending
-	s.pending = nil
-	if s.status == notifyAuthorized {
-		for _, n := range pending {
-			s.add(n)
-		}
-	}
 }

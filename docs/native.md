@@ -64,6 +64,9 @@ if err := n.Show(); err != nil {
 only, which `mygo dev` and `mygo build` make; `mygo.NotificationsSupported()`
 reports whether the app can show them. Linux shows them through the
 desktop's notification service, Windows as notification-area balloons.
+`Show` asks the user for permission on macOS, the first time it is called,
+and returns an error once the user has not allowed notifications, rather
+than silently showing nothing.
 
 ## Clipboard
 

@@ -35,8 +35,15 @@ type Backend struct {
 	hotkeys     map[int]uintptr
 	hkInstalled bool
 
-	notifyDelegate   id
-	notifyAuthorized bool
+	notifyDelegate id
+	// Notification authorization, asked once with the app's first
+	// notification: macOS answers on a queue of its own, and the
+	// notifications asked for before the answer wait in notifyPending.
+	notifyAsked    bool
+	notifyResolved bool
+	notifyGranted  bool
+	notifyErr      error
+	notifyPending  []*platform.Notification
 
 	stepping       int
 	quitAfterModal bool
@@ -103,6 +110,7 @@ func (b *Backend) Init(h platform.AppHandler, opts platform.AppOptions) error {
 	b.delegate = alloc("MyGoAppDelegate")
 	send(b.app, "setDelegate:", uintptr(b.delegate))
 	b.menuTarget = alloc("MyGoMenuTarget")
+	attachNotificationDelegate()
 
 	// A run loop source drives the queue of functions posted from other
 	// goroutines. It fires in every run loop mode, including while menus

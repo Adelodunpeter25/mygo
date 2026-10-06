@@ -34,6 +34,12 @@ type Theme struct {
 	Selection Color
 	// Focus is the ring around the control with the keyboard focus.
 	Focus Color
+	// TooltipBackground and TooltipText color tooltips. A color left zero
+	// is the theme's Text, for the background, or Background, for the
+	// text: the tooltip is the theme turned over, so as to stand out from
+	// what it is over, light in a dark theme and dark in a light one.
+	TooltipBackground Color
+	TooltipText       Color
 	// Scrollbar colors scroll bar thumbs, ScrollbarWidth DIPs wide (6 by
 	// default; 0 is 6).
 	Scrollbar      Color
@@ -58,6 +64,18 @@ func (t *Theme) Space(n float32) float32 {
 		s = 4
 	}
 	return n * s
+}
+
+// tooltipColors returns the background and text colors of a tooltip.
+func (t *Theme) tooltipColors() (background, text Color) {
+	background, text = t.Text, t.Background
+	if t.TooltipBackground != Transparent {
+		background = t.TooltipBackground
+	}
+	if t.TooltipText != Transparent {
+		text = t.TooltipText
+	}
+	return background, text
 }
 
 func (t *Theme) scrollbarWidth() float32 {

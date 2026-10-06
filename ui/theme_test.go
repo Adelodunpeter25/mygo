@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestSpacingScalesWidgets(t *testing.T) {
 	type sizes struct{ button, check, tab Rect }
@@ -74,5 +77,65 @@ func TestParseHex(t *testing.T) {
 	}
 	if n := testing.AllocsPerRun(10, func() { Hex("#2563eb") }); n != 0 {
 		t.Errorf("Hex allocates %v times", n)
+	}
+}
+
+func TestTooltipColors(t *testing.T) {
+	th := *DarkTheme()
+	if bg, text := th.tooltipColors(); bg != th.Text || text != th.Background {
+		t.Errorf("a theme without tooltip colors gives %v on %v, not its text on its background", text, bg)
+	}
+	th.TooltipBackground = Hex("#3a3a40")
+	if bg, text := th.tooltipColors(); bg != Hex("#3a3a40") || text != th.Background {
+		t.Errorf("a tooltip background alone gives %v on %v", text, bg)
+	}
+	th.TooltipText = Hex("#f2f2f7")
+	if bg, text := th.tooltipColors(); bg != Hex("#3a3a40") || text != Hex("#f2f2f7") {
+		t.Errorf("both tooltip colors give %v on %v", text, bg)
+	}
+}
+
+// tooltipBackdrop shows a tooltip of a button in a window of the theme the
+// function returns, and returns the color of the tooltip's background.
+func tooltipBackdrop(t *testing.T, theme func(*Context) *Theme) Color {
+	t.Helper()
+	tt := NewTester(func(c *Context) {
+		c.SetTheme(theme(c))
+		Column(c).Padding(40).Children(func() {
+			Button(c, "Go").Label("button").Tooltip("Split right")
+		})
+	}, 400, 200)
+	b, ok := tt.Find("button")
+	if !ok {
+		t.Fatalf("no button; texts %q", tt.Texts())
+	}
+	tt.Move(b.X+b.W/2, b.Y+b.H/2)
+	deadline := time.Now().Add(3 * time.Second)
+	for !tt.HasText("Split right") {
+		if time.Now().After(deadline) {
+			t.Fatal("the tooltip did not show")
+		}
+		time.Sleep(50 * time.Millisecond)
+		tt.Frame()
+	}
+	tip, _ := tt.Find("Split right")
+	// Left of the text, inside the tooltip's padding.
+	px := tt.Image().RGBAAt(int(tip.X)-3, int(tip.Y+tip.H/2))
+	return Color{px.R, px.G, px.B, px.A}
+}
+
+func TestTooltipBackgroundOfTheTheme(t *testing.T) {
+	dark := func(c *Context) *Theme { th := *DarkTheme(); return &th }
+	if got, want := tooltipBackdrop(t, dark), DarkTheme().Text; got != want {
+		t.Errorf("a dark theme's tooltip is %v, not its text color %v", got, want)
+	}
+	custom := func(c *Context) *Theme {
+		th := *DarkTheme()
+		th.TooltipBackground = Hex("#3a3a40")
+		th.TooltipText = Hex("#f2f2f7")
+		return &th
+	}
+	if got, want := tooltipBackdrop(t, custom), Hex("#3a3a40"); got != want {
+		t.Errorf("the tooltip is %v, not the theme's TooltipBackground %v", got, want)
 	}
 }

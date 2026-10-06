@@ -51,6 +51,9 @@ type Backend struct {
 	OpenResult    []string
 	SaveResult    string
 	MessageResult platform.MessageBoxResult
+	// NotificationError, when set, is what showing a notification fails
+	// with.
+	NotificationError error
 	// notifications are the notifications shown and not yet removed, by
 	// id.
 	notifications map[string]*platform.Notification
@@ -235,16 +238,21 @@ func (b *Backend) PressHotkey(acc string) {
 // what the app asked for and report a click as a platform does.
 func (b *Backend) NotificationsSupported() bool { return true }
 
-func (b *Backend) ShowNotification(n *platform.Notification) error {
+func (b *Backend) ShowNotification(n *platform.Notification, done func(error)) {
 	b.mu.Lock()
-	defer b.mu.Unlock()
+	if err := b.NotificationError; err != nil {
+		b.mu.Unlock()
+		done(err)
+		return
+	}
 	if b.notifications == nil {
 		b.notifications = map[string]*platform.Notification{}
 	}
 	// A copy, as a real backend keeps its own.
 	c := *n
 	b.notifications[n.ID] = &c
-	return nil
+	b.mu.Unlock()
+	done(nil)
 }
 
 func (b *Backend) RemoveNotification(id string) {

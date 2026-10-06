@@ -1555,6 +1555,23 @@ func TestGlobalShortcut(t *testing.T) {
 	}
 }
 
+// TestNotificationShowFails: Show returns what the backend answers, and
+// forgets a notification it could not show, which nothing will click.
+func TestNotificationShowFails(t *testing.T) {
+	onMain(func() { fb.NotificationError = ErrNotificationsDenied })
+	t.Cleanup(func() { onMain(func() { fb.NotificationError = nil }) })
+	n := NewNotification(NotificationOptions{Title: "Export finished"})
+	if err := n.Show(); !errors.Is(err, ErrNotificationsDenied) {
+		t.Errorf("Show = %v", err)
+	}
+	notifications.Lock()
+	_, kept := notifications.byID[n.id]
+	notifications.Unlock()
+	if kept {
+		t.Error("the notification is kept")
+	}
+}
+
 func TestParseColor(t *testing.T) {
 	rgba := func(r, g, b, a uint8) platform.Color { return platform.Color{R: r, G: g, B: b, A: a} }
 	tests := map[string]platform.Color{

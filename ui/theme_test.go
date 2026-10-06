@@ -80,62 +80,61 @@ func TestParseHex(t *testing.T) {
 	}
 }
 
-func TestTooltipColors(t *testing.T) {
+func TestInverseColors(t *testing.T) {
 	th := *DarkTheme()
-	if bg, text := th.tooltipColors(); bg != th.Text || text != th.Background {
-		t.Errorf("a theme without tooltip colors gives %v on %v, not its text on its background", text, bg)
+	if fill, text := th.inverse(); fill != th.Text || text != th.Background {
+		t.Errorf("a theme without inverse colors gives %v on %v, not its text on its background", text, fill)
 	}
-	th.TooltipBackground = Hex("#3a3a40")
-	if bg, text := th.tooltipColors(); bg != Hex("#3a3a40") || text != th.Background {
-		t.Errorf("a tooltip background alone gives %v on %v", text, bg)
+	th.Inverse = Hex("#3a3a40")
+	if fill, text := th.inverse(); fill != Hex("#3a3a40") || text != th.Background {
+		t.Errorf("Inverse alone gives %v on %v", text, fill)
 	}
-	th.TooltipText = Hex("#f2f2f7")
-	if bg, text := th.tooltipColors(); bg != Hex("#3a3a40") || text != Hex("#f2f2f7") {
-		t.Errorf("both tooltip colors give %v on %v", text, bg)
+	th.InverseText = Hex("#f2f2f7")
+	if fill, text := th.inverse(); fill != Hex("#3a3a40") || text != Hex("#f2f2f7") {
+		t.Errorf("both inverse colors give %v on %v", text, fill)
 	}
 }
 
-// tooltipBackdrop shows a tooltip of a button in a window of the theme the
-// function returns, and returns the color of the tooltip's background.
-func tooltipBackdrop(t *testing.T, theme func(*Context) *Theme) Color {
+// inverseFills shows a tooltip and a toast in a window of theme th, and
+// returns the colors they are filled with.
+func inverseFills(t *testing.T, th *Theme) (tooltip, toast Color) {
 	t.Helper()
 	tt := NewTester(func(c *Context) {
-		c.SetTheme(theme(c))
+		c.SetTheme(th)
 		Column(c).Padding(40).Children(func() {
-			Button(c, "Go").Label("button").Tooltip("Split right")
+			if Button(c, "Save").Tooltip("Save the note").Clicked() {
+				c.Toast("Saved")
+			}
 		})
-	}, 400, 200)
-	b, ok := tt.Find("button")
-	if !ok {
-		t.Fatalf("no button; texts %q", tt.Texts())
-	}
-	tt.Move(b.X+b.W/2, b.Y+b.H/2)
-	deadline := time.Now().Add(3 * time.Second)
-	for !tt.HasText("Split right") {
-		if time.Now().After(deadline) {
-			t.Fatal("the tooltip did not show")
+	}, 400, 300)
+	// Left of the text, inside the padding.
+	fill := func(s string) Color {
+		r, ok := tt.Find(s)
+		if !ok {
+			t.Fatalf("no %q; texts %q", s, tt.Texts())
 		}
-		time.Sleep(50 * time.Millisecond)
-		tt.Frame()
+		px := tt.Image().RGBAAt(int(r.X)-3, int(r.Y+r.H/2))
+		return Color{px.R, px.G, px.B, px.A}
 	}
-	tip, _ := tt.Find("Split right")
-	// Left of the text, inside the tooltip's padding.
-	px := tt.Image().RGBAAt(int(tip.X)-3, int(tip.Y+tip.H/2))
-	return Color{px.R, px.G, px.B, px.A}
+	b, _ := tt.Find("Save")
+	tt.Move(b.X+b.W/2, b.Y+b.H/2)
+	tt.rt.hoverSince = time.Now().Add(-time.Second)
+	tt.Frame()
+	tooltip = fill("Save the note")
+	tt.Click("Save")
+	// Past its fading in.
+	tt.rt.toasts[0].at = time.Now().Add(-time.Second)
+	tt.Frame()
+	return tooltip, fill("Saved")
 }
 
-func TestTooltipBackgroundOfTheTheme(t *testing.T) {
-	dark := func(c *Context) *Theme { th := *DarkTheme(); return &th }
-	if got, want := tooltipBackdrop(t, dark), DarkTheme().Text; got != want {
-		t.Errorf("a dark theme's tooltip is %v, not its text color %v", got, want)
+func TestInverseFillsTooltipsAndToasts(t *testing.T) {
+	th := *DarkTheme()
+	if tooltip, toast := inverseFills(t, &th); tooltip != th.Text || toast != th.Text {
+		t.Errorf("a dark theme fills a tooltip with %v and a toast with %v, not its text color %v", tooltip, toast, th.Text)
 	}
-	custom := func(c *Context) *Theme {
-		th := *DarkTheme()
-		th.TooltipBackground = Hex("#3a3a40")
-		th.TooltipText = Hex("#f2f2f7")
-		return &th
-	}
-	if got, want := tooltipBackdrop(t, custom), Hex("#3a3a40"); got != want {
-		t.Errorf("the tooltip is %v, not the theme's TooltipBackground %v", got, want)
+	th.Inverse, th.InverseText = Hex("#3a3a40"), Hex("#f2f2f7")
+	if tooltip, toast := inverseFills(t, &th); tooltip != th.Inverse || toast != th.Inverse {
+		t.Errorf("a theme fills a tooltip with %v and a toast with %v, not its Inverse %v", tooltip, toast, th.Inverse)
 	}
 }

@@ -34,12 +34,12 @@ type Theme struct {
 	Selection Color
 	// Focus is the ring around the control with the keyboard focus.
 	Focus Color
-	// TooltipBackground and TooltipText color tooltips. A color left zero
-	// is the theme's Text, for the background, or Background, for the
-	// text: the tooltip is the theme turned over, so as to stand out from
-	// what it is over, light in a dark theme and dark in a light one.
-	TooltipBackground Color
-	TooltipText       Color
+	// Inverse fills tooltips and toasts, the theme turned over so that
+	// they stand out from what they are over: dark in a light theme, light
+	// in a dark one. InverseText is text on it. Left zero, they are Text
+	// and Background.
+	Inverse     Color
+	InverseText Color
 	// Scrollbar colors scroll bar thumbs, ScrollbarWidth DIPs wide (6 by
 	// default; 0 is 6).
 	Scrollbar      Color
@@ -66,16 +66,17 @@ func (t *Theme) Space(n float32) float32 {
 	return n * s
 }
 
-// tooltipColors returns the background and text colors of a tooltip.
-func (t *Theme) tooltipColors() (background, text Color) {
-	background, text = t.Text, t.Background
-	if t.TooltipBackground != Transparent {
-		background = t.TooltipBackground
+// inverse returns the fill of tooltips and toasts, and the color of text
+// on it.
+func (t *Theme) inverse() (fill, text Color) {
+	fill, text = t.Inverse, t.InverseText
+	if fill == Transparent {
+		fill = t.Text
 	}
-	if t.TooltipText != Transparent {
-		text = t.TooltipText
+	if text == Transparent {
+		text = t.Background
 	}
-	return background, text
+	return fill, text
 }
 
 func (t *Theme) scrollbarWidth() float32 {

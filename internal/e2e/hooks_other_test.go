@@ -101,6 +101,9 @@ func lazyGPU(bool) bool                                       { return false }
 func useGPU(*mygo.Window) bool                                { return false }
 func surfaceInputLowest(*mygo.Window) bool                    { return true }
 
+// Only macOS has key-value observing.
+func observe(*mygo.Window) (func(), bool) { return nil, false }
+
 func rightClick(*mygo.Window, float64, float64) bool { return false }
 func popupMenus() ([][]string, bool)                 { return nil, false }
 func choosePopupItem(string) bool                    { return false }

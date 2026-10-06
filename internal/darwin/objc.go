@@ -39,7 +39,7 @@ var (
 	msgSize          func(obj id, sel objc.SEL) NSSize
 	msgSetSize       func(obj id, sel objc.SEL, s NSSize)
 	msgSuperSetSize  func(sup uintptr, sel objc.SEL, s NSSize)
-	msgPoint        func(obj id, sel objc.SEL) NSPoint
+	msgPoint         func(obj id, sel objc.SEL) NSPoint
 	msgSetPoint      func(obj id, sel objc.SEL, p NSPoint)
 	msgInitRect      func(obj id, sel objc.SEL, r NSRect) id
 	msgInitRectID    func(obj id, sel objc.SEL, r NSRect, a id) id
@@ -155,9 +155,10 @@ func load() {
 }
 
 var (
-	selMu    sync.RWMutex
-	selCache = map[string]objc.SEL{}
-	clsCache = map[string]id{}
+	selMu      sync.RWMutex
+	selCache   = map[string]objc.SEL{}
+	clsCache   = map[string]id{}
+	superCache = map[string]id{}
 )
 
 // sel returns the selector for name, cached.
@@ -236,21 +237,43 @@ type objcSuper struct {
 	superClass id
 }
 
+// superOf returns the struct objc_super that calls the superclass of
+// className with self, pinned until pin is unpinned: passed as an integer,
+// it must stay off the stack, which may move. The superclass is resolved
+// from className rather than from the object's class, which the runtime may
+// replace with a generated subclass (key-value observing does): resolving
+// "super" from it would call the override again and recurse forever.
+func superOf(self id, className string, pin *runtime.Pinner) uintptr {
+	sup := &objcSuper{receiver: self, superClass: superclass(className)}
+	pin.Pin(sup)
+	return uintptr(unsafe.Pointer(sup))
+}
+
+// superclass returns the superclass of a class, cached: overrides call it
+// as often as AppKit calls them, as setFrameSize: while a window resizes.
+func superclass(name string) id {
+	selMu.RLock()
+	c, ok := superCache[name]
+	selMu.RUnlock()
+	if ok {
+		return c
+	}
+	c = id(objc.Class(class(name)).SuperClass())
+	selMu.Lock()
+	superCache[name] = c
+	selMu.Unlock()
+	return c
+}
+
 // sendSuper calls the superclass implementation of a method overridden in
-// className. The superclass is resolved from className rather than from the
-// object's class, which the runtime may replace with a generated subclass
-// (key-value observing does): resolving "super" from it would call the
-// override again and recurse forever.
+// className (see superOf).
 //
 //go:uintptrescapes
 func sendSuper(self id, className string, s objc.SEL, args ...uintptr) id {
-	sup := &objcSuper{receiver: self, superClass: id(objc.Class(class(className)).SuperClass())}
-	// Passed as an integer: pinning keeps it off the stack, which may move.
 	var pin runtime.Pinner
-	pin.Pin(sup)
 	defer pin.Unpin()
 	var a [10]uintptr
-	a[0], a[1] = uintptr(unsafe.Pointer(sup)), uintptr(s)
+	a[0], a[1] = superOf(self, className, &pin), uintptr(s)
 	n := copy(a[2:], args)
 	r, _, _ := purego.SyscallN(msgSendSuperAddr, a[:n+2]...)
 	return id(r)
@@ -259,11 +282,9 @@ func sendSuper(self id, className string, s objc.SEL, args ...uintptr) id {
 // sendSuperSize is sendSuper for a method taking an NSSize, which travels in
 // floating-point registers and so cannot go through the integer arguments.
 func sendSuperSize(self id, className string, s objc.SEL, size NSSize) {
-	sup := &objcSuper{receiver: self, superClass: id(objc.Class(class(className)).SuperClass())}
 	var pin runtime.Pinner
-	pin.Pin(sup)
 	defer pin.Unpin()
-	msgSuperSetSize(uintptr(unsafe.Pointer(sup)), s, size)
+	msgSuperSetSize(superOf(self, className, &pin), s, size)
 }
 
 func respondsTo(obj id, selector string) bool {
